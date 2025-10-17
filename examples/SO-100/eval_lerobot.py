@@ -70,10 +70,12 @@ from lerobot.utils.utils import (
 # Sometimes we would like to abstract different env, or run this on a separate machine
 # User can just move this single python class method gr00t/eval/service.py
 # to their code or do the following line below
-# sys.path.append(os.path.expanduser("~/Isaac-GR00T/gr00t/eval/"))
-from service import ExternalRobotInferenceClient
+import sys
+import os
+sys.path.append(os.path.expanduser("~/home/wsi-robotics/forks/Isaac-GR00T/gr00t/eval/"))
+#from service import ExternalRobotInferenceClient
 
-# from gr00t.eval.service import ExternalRobotInferenceClient
+from gr00t.eval.service import ExternalRobotInferenceClient
 
 #################################################################################
 
