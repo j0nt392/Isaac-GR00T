@@ -53,7 +53,7 @@ pyrightconfig.json
 doc/_build/
 *.swp
 .DS_Store
-
+outputs/
 
 # python
 
