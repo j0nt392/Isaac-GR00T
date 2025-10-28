@@ -44,6 +44,7 @@ python -m lerobot.replay \
 
 import logging
 import time
+import requests
 from dataclasses import asdict, dataclass
 from pprint import pformat
 
