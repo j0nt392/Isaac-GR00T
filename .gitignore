@@ -54,6 +54,7 @@ doc/_build/
 *.swp
 .DS_Store
 outputs/
+demo_data/
 
 # python
 
