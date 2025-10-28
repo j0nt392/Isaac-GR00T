@@ -47,7 +47,7 @@ import time
 import requests
 from dataclasses import asdict, dataclass
 from pprint import pformat
-
+import cv2
 import draccus
 import matplotlib.pyplot as plt
 import numpy as np
@@ -197,6 +197,29 @@ class EvalConfig:
     timeout: int = 60  # timeout in seconds
     show_images: bool = False  # whether to show images
 
+BACKEND = "http://localhost:8000"
+
+def send_telemetry(observation_dict, robot_state_keys):
+    motors = [float(observation_dict[k]) for k in robot_state_keys]
+    payload = {"t": time.time(), "motors": motors}
+    try: 
+        requests.post(f"{BACKEND}/ingest", json=payload, timeout=0.2)
+    except Exception as e:
+        logging.error(f"Failed to send telemetry: {e}")
+
+def send_frame(camera_key: str, frame_bgr):
+    ok, buf = cv2.imencode(".jpg", frame_bgr)
+    if not ok:
+        return
+    try:
+        requests.post(
+            f"{BACKEND}/ingest_frame/{camera_key}",
+            data=buf.tobytes(),
+            headers={"content-type": "image/jpeg"},
+            timeout=0.2,
+        )
+    except Exception:
+        pass
 
 @draccus.wrap()
 def eval(cfg: EvalConfig):
@@ -237,6 +260,11 @@ def eval(cfg: EvalConfig):
     while True:
         # get the realtime image
         observation_dict = robot.get_observation()
+        send_telemetry(observation_dict, robot_state_keys)
+        if "front" in observation_dict:
+            send_frame("front", observation_dict["front"])
+        if "wrist" in observation_dict:
+            send_frame("wrist", observation_dict["wrist"])
         print("observation_dict", observation_dict.keys())
         action_chunk = policy.get_action(observation_dict, language_instruction)
 
