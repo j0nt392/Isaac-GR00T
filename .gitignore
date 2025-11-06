@@ -101,6 +101,7 @@ dist
 # Log
 *.log
 *.log.*
+**/logs/**.txt
 
 # Data
 !**/alpaca-data-conversation.json
