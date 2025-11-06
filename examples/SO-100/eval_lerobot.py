@@ -43,14 +43,22 @@ python -m lerobot.replay \
 """
 
 import logging
+import os
+
+# NOTE:
+# Sometimes we would like to abstract different env, or run this on a separate machine
+# User can just move this single python class method gr00t/eval/service.py
+# to their code or do the following line below
+import sys
 import time
-import requests
 from dataclasses import asdict, dataclass
 from pprint import pformat
+
 import cv2
 import draccus
 import matplotlib.pyplot as plt
 import numpy as np
+import requests
 from lerobot.cameras.opencv.configuration_opencv import (  # noqa: F401
     OpenCVCameraConfig,
 )
@@ -67,14 +75,8 @@ from lerobot.utils.utils import (
     log_say,
 )
 
-# NOTE:
-# Sometimes we would like to abstract different env, or run this on a separate machine
-# User can just move this single python class method gr00t/eval/service.py
-# to their code or do the following line below
-import sys
-import os
 sys.path.append(os.path.expanduser("~/home/wsi-robotics/forks/Isaac-GR00T/gr00t/eval/"))
-#from service import ExternalRobotInferenceClient
+# from service import ExternalRobotInferenceClient
 
 from gr00t.eval.service import ExternalRobotInferenceClient
 
@@ -183,7 +185,7 @@ def view_img(img, overlay_img=None):
 
 
 def print_yellow(text):
-    print("\033[93m {}\033[00m".format(text))
+    print(f"\033[93m {text}\033[00m")
 
 
 @dataclass
@@ -197,17 +199,21 @@ class EvalConfig:
     timeout: int = 60  # timeout in seconds
     show_images: bool = False  # whether to show images
 
+
 BACKEND = "http://localhost:8000"
+
 
 def send_telemetry(observation_dict, robot_state_keys):
     motors = [float(observation_dict[k]) for k in robot_state_keys]
     payload = {"t": time.time(), "motors": motors}
-    try: 
+    try:
         requests.post(f"{BACKEND}/ingest", json=payload, timeout=0.2)
     except Exception as e:
         logging.error(f"Failed to send telemetry: {e}")
 
-def send_frame(camera_key: str, frame_bgr):
+
+def send_frame(camera_key: str, frame_rgb):
+    frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
     ok, buf = cv2.imencode(".jpg", frame_bgr)
     if not ok:
         return
@@ -216,10 +222,11 @@ def send_frame(camera_key: str, frame_bgr):
             f"{BACKEND}/ingest_frame/{camera_key}",
             data=buf.tobytes(),
             headers={"content-type": "image/jpeg"},
-            timeout=0.2,
+            timeout=0.1,
         )
     except Exception:
         pass
+
 
 @draccus.wrap()
 def eval(cfg: EvalConfig):
@@ -241,7 +248,7 @@ def eval(cfg: EvalConfig):
     # NOTE: for so100/so101, this should be:
     # ['shoulder_pan.pos', 'shoulder_lift.pos', 'elbow_flex.pos', 'wrist_flex.pos', 'wrist_roll.pos', 'gripper.pos']
     robot_state_keys = list(robot._motors_ft.keys())
-    print("robot_state_keys: ", robot_state_keys)
+    # print("robot_state_keys: ", robot_state_keys)
 
     # Step 2: Initialize the policy
     policy = Gr00tRobotInferenceClient(
@@ -260,17 +267,17 @@ def eval(cfg: EvalConfig):
     while True:
         # get the realtime image
         observation_dict = robot.get_observation()
-        send_telemetry(observation_dict, robot_state_keys)
-        if "front" in observation_dict:
-            send_frame("front", observation_dict["front"])
-        if "wrist" in observation_dict:
-            send_frame("wrist", observation_dict["wrist"])
-        print("observation_dict", observation_dict.keys())
+        # send_telemetry(observation_dict, robot_state_keys)
+        # if "front" in observation_dict:
+        #     send_frame("front", observation_dict["front"])
+        # if "wrist" in observation_dict:
+        #     send_frame("wrist", observation_dict["wrist"])
+        # print("observation_dict", observation_dict.keys())
         action_chunk = policy.get_action(observation_dict, language_instruction)
 
         for i in range(cfg.action_horizon):
             action_dict = action_chunk[i]
-            print("action_dict", action_dict.keys())
+            # print("action_dict", action_dict.keys())
             robot.send_action(action_dict)
             time.sleep(0.02)  # Implicitly wait for the action to be executed
 

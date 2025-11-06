@@ -149,6 +149,8 @@ exclude = '''
 [tool.isort]
 profile = "black"
 multi_line_output = 3
+include_trailing_comma = true
+known_third_party = ["cv2", "numpy", "openai"]
 
 # You can override these pyright settings by adding a personal pyrightconfig.json file.
 [tool.pyright]
@@ -157,6 +159,13 @@ reportPrivateImportUsage = false
 [tool.ruff]
 line-length = 115
 target-version = "py310"
+fix = true
+extend-select = ["I", "E", "F", "W", "UP", "N", "B", "C4"]
+ignore = ["E501"]  # Let black handle line length
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
