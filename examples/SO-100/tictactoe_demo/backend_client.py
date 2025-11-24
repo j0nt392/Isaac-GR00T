@@ -31,6 +31,7 @@ def send_reasoning(move: dict) -> None:
             "reasoning": str(move.get("reasoning", "")),
             "action": str(move.get("action", "")),
             "game_over": bool(move.get("game_over", False)),
+            "game_state": str(move.get("game_state", "")),
         }
         requests.post(f"{BACKEND_URL}/reasoning", json=payload, timeout=0.3)
     except Exception:

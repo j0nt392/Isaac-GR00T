@@ -69,11 +69,12 @@ class VLMClient:
         encoded_img = self._encode_image_to_base64(img)
         turn_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
-        move_dict = None
+        move_dict = {}
 
         stream = self.client.responses.create(
             model="gpt-5",
             reasoning={"effort": reasoning_effort, "summary": "auto"},
+            text={"verbosity": "low"},
             input=[
                 {
                     "role": "user",
@@ -107,7 +108,7 @@ class VLMClient:
                     move_dict = json.loads(final_json)
                     self._validate_move_dict(move_dict)
                 except json.JSONDecodeError:
-                    print_yellow(f" ⚠️ Could not parse JSON:\n{final_json}")
+                    print_yellow(f" ⚠️ Could not parse JSON:\n{final_json}. Using default move.")
                     move_dict = DEFAULT_MOVE
                 continue
 

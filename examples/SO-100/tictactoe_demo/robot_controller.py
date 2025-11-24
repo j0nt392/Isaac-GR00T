@@ -12,7 +12,6 @@ from backend_client import (
     send_reasoning,
     send_telemetry,
     set_player_turn,
-    stop_ec2,
 )
 from config import TicTacToeConfig
 from eval_lerobot import Gr00tRobotInferenceClient
@@ -65,7 +64,7 @@ class TicTacToeBot:
         images = {"raw": None, "bev": None, "enhanced": None}
 
         # Capture image
-        timestamp = datetime.datetime.now().strftime("%H_%M_%S")
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         _ = self.robot.get_observation()  # flush any previous latest_frame
         time.sleep(1.0 / 30.0)  # wait for the camera to settle
         observation_dict = self.robot.get_observation()
@@ -85,7 +84,9 @@ class TicTacToeBot:
         # (Optional) Show board img that will be sent to VLM
         if self.cfg.show_board_images:
             plt.imshow(img)
+            print("showing board image")
             plt.show()
+
         # (Optional) Save all images used
         if self.cfg.save_images:
             save_images(images, timestamp)
@@ -151,4 +152,3 @@ class TicTacToeBot:
 
         print_blue(GAME_RESULT[self.game_state])
         print_blue(" 🏆 Game over! Thanks for playing.")
-        stop_ec2()
