@@ -25,47 +25,34 @@ def print_blue(text):
 
 
 def project_image_to_bev(img: np.ndarray) -> np.ndarray:
-    # Rotate image 180 degrees to align with user point-of-view
-    img = np.rot90(img, k=2)
-
     # Source points (corners of the board in the original image)
     pts_src = np.float32(
         [
-            [196, 158],  # top-left
-            [432, 149],  # top-right
-            [406, 336],  # bottom-right
-            [224, 344],  # bottom-left
+            [277, 62],  # top-left
+            [519, 140],  # top-right
+            [413, 379],  # bottom-right
+            [126, 252],  # bottom-left
         ]
     )
-    # Destination points (straight square board)
-    pts_dst = np.float32([[0, 0], [300, 0], [300, 300], [0, 300]])
+    # Destination points (perfect square board)
+    pts_dst = np.float32([[0, 0], [600, 0], [600, 600], [0, 600]])
     # Compute perspective transform matrix
     M = cv2.getPerspectiveTransform(pts_src, pts_dst)
-
     # Apply warp
-    warped = cv2.warpPerspective(img, M, (300, 300))
+    warped = cv2.warpPerspective(img, M, (600, 600))
 
     return warped
 
 
 def enhance_image(img: np.ndarray) -> np.ndarray:
-    # Apply smooth (optional)
-    smoothed = cv2.edgePreservingFilter(img, flags=1, sigma_s=60, sigma_r=0.4)
-
-    # 2️⃣ Convert to HSV to adjust brightness/contrast more naturally
-    hsv = cv2.cvtColor(smoothed, cv2.COLOR_BGR2HSV)
-    h, s, v = cv2.split(hsv)
-
-    # Increase brightness and contrast on the value channel
-    v = cv2.convertScaleAbs(v, alpha=1.5, beta=20)
-
-    # Merge back and convert to RGB
-    hsv_enhanced = cv2.merge([h, s, v])
-    enhanced = cv2.cvtColor(hsv_enhanced, cv2.COLOR_HSV2BGR)
-
-    # Mild sharpening to make Xs/Os stand out
-    kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
-    enhanced = cv2.filter2D(enhanced, -1, kernel)
+    # Convert to grayscale for morphology
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    # Structuring element size should match grid-line thickness
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
+    # Top-Hat: emphasizes bright thin lines on darker background
+    tophat = cv2.morphologyEx(gray, cv2.MORPH_TOPHAT, kernel)
+    # Add result to original to boost bright elements
+    enhanced = cv2.add(gray, tophat)
 
     return enhanced
 

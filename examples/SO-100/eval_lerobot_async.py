@@ -165,6 +165,35 @@ class Gr00tRobotInferenceClient:
 #################################################################################
 
 
+######################### RTC Merge Function ####################################
+
+
+def merge_with_queue(action_queue: Queue, new_chunk: list[dict[str, float]], overlap: int = 4):
+    """
+    Merge new actions into the existing queue using RTC-style blending.
+    Only blends actions that haven't been sent yet, updates in place.
+    """
+    current_actions = action_queue.queue  # direct access to deque
+    remaining_actions = len(current_actions)
+    actual_overlap = min(overlap, remaining_actions, len(new_chunk))
+
+    # Blend overlap region in place
+    for i in range(actual_overlap):
+        alpha = np.exp(-i / actual_overlap)  # exponential decay
+        blended = {
+            k: alpha * current_actions[-actual_overlap + i][k] + (1 - alpha) * new_chunk[i][k]
+            for k in current_actions[-actual_overlap + i]
+        }
+        current_actions[-actual_overlap + i] = blended
+
+    # Append remaining new actions if space allows
+    for act in new_chunk[actual_overlap:]:
+        if len(current_actions) >= action_queue.maxsize:
+            break
+        current_actions.append(act)
+
+
+#################################################################################
 def view_img(img, overlay_img=None):
     """
     This is a matplotlib viewer since cv2.imshow can be flaky in lerobot env
@@ -191,12 +220,12 @@ class EvalConfig:
     policy_port: int = 5555  # port of the gr00t server
     action_horizon: int = 8  # number of actions to execute from the action chunk
     actions_per_chunk: int = 16  # how many actions to enqueue per policy query (server max ~16)
-    chunk_size_threshold: float = 0.3  # send new obs when qsize/chunk_size <= threshold
+    chunk_size_threshold: float = 0.5  # send new obs when qsize/chunk_size <= threshold
     lang_instruction: str = "Grab pens and place into pen holder."
     play_sounds: bool = False  # whether to play sounds
     timeout: int = 60  # timeout in seconds
     show_images: bool = False  # whether to show images
-    control_hz: float = 20.0
+    control_hz: float = 30.0
     min_queue_size: int = 16
     max_queue_size: int = 16
 
@@ -238,7 +267,6 @@ def eval(cfg: EvalConfig):
 
     # Runtime clamps to keep queue/chunk sizes stable and avoid jerkiness
     max_queue_size = min(int(cfg.max_queue_size), 16)
-    min_queue_size = max(1, min(int(cfg.min_queue_size), max_queue_size - 2))
     actions_per_chunk = max(1, min(int(cfg.actions_per_chunk), 16))
 
     action_queue: Queue[dict[str, float]] = Queue(maxsize=max_queue_size)
@@ -274,39 +302,52 @@ def eval(cfg: EvalConfig):
                     action_chunk_size = max(action_chunk_size, received_len)
 
                 # enqueue actions, respecting max_queue_size
-                for idx, action_dict in enumerate(action_chunk):
-                    if idx >= actions_per_chunk:
-                        break
-                    if stop_event.is_set():
-                        break
-                    if action_queue.full():
-                        break
-                    action_queue.put(action_dict)
+                # for idx, action_dict in enumerate(action_chunk):
+                #     if idx >= actions_per_chunk:
+                #         break
+                #     if stop_event.is_set():
+                #         break
+                #     if action_queue.full():
+                #         break
+                #     action_queue.put(action_dict)
+                merge_with_queue(action_queue, action_chunk, overlap=cfg.actions_per_chunk // 2)
 
             except Exception as e:
                 logging.error(f"[inference_loop] Error: {e}")
                 time.sleep(0.05)
 
     # ---------- CONTROL LOOP (MAIN THREAD) ----------
+
     def control_loop():
         nonlocal last_action
+        smoothing_factor = 0.8  # 80% previous action, 20% new action (tune as needed)
+
         while not stop_event.is_set():
             t0 = time.time()
             try:
                 # Get a fresh action if available
                 action = action_queue.get_nowait()
-                last_action = action
             except Empty:
-                # No new action: hold previous; do NOT send zeros to avoid jumps to mid-range
+                # No new action: hold previous
                 if last_action is None:
                     time.sleep(0.002)
                     continue
                 action = last_action
 
+            # Apply low-pass filter for smoothness (always, if last_action exists)
+            if last_action is not None:
+                action = {
+                    k: smoothing_factor * last_action[k] + (1 - smoothing_factor) * action[k]
+                    for k in action
+                }
+
+            # Send filtered action
             try:
                 robot.send_action(action)
             except Exception as e:
                 logging.error(f"[control_loop] Error sending action: {e}")
+
+            last_action = action  # Update for next iteration
 
             elapsed = time.time() - t0
             time.sleep(max(0.0, control_dt - elapsed))
