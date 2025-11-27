@@ -29,6 +29,9 @@ DEFAULT_MOVE = {
 
 @dataclass
 class TicTacToeConfig(EvalConfig):
+    action_smoothing_factor: float = 0.6  # 60% old action, 40% new action (tune as needed)
+    camera_fps: int = 30
+    control_hz: int = 30  # speed of the robot's movements
     enhance_images: bool = False  # whether to apply image enhancement preprocessing
     save_images: bool = (
         False  # whether to save captured board images to disk (Isaac-GR00T/board_images/)

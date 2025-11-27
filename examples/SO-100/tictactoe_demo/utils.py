@@ -7,6 +7,7 @@ import sys
 
 # Third-party libraries
 import cv2
+import matplotlib.pyplot as plt
 import numpy as np
 
 # Local modules
@@ -55,6 +56,28 @@ def enhance_image(img: np.ndarray) -> np.ndarray:
     enhanced = cv2.add(gray, tophat)
 
     return enhanced
+
+
+def prepare_frame_for_vlm(self, obs: dict) -> np.ndarray:
+    """
+    Preprocesses an image before sending it to VLM for board analysis.
+    The image is projected to BEV for a better perspective of the board, and then optionally enhanced by emphasizing contrast.
+    The raw, bev and enhanced images are optionally saved.
+    """
+    img_raw = obs.get("front")
+    img_bev = project_image_to_bev(img_raw)
+    img = img_bev
+    if self.cfg.enhance_images:
+        img = enhance_image(img_bev)
+    if self.cfg.show_board_images:
+        print("Showing board image")
+        plt.imshow(img)
+        plt.show()
+    if self.cfg.save_images:
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        save_images({"raw": img_raw, "bev": img_bev, "enhanced": img}, timestamp)
+
+    return img
 
 
 def save_images(images: dict, timestamp: str) -> None:

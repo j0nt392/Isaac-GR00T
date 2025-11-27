@@ -1,3 +1,11 @@
+"""
+This is a single, synchronous script for the Tic-Tac-Toe demo.
+For the asynchronous version with real-time chunking (RTC) policy, see the following modules:
+- camera.py
+- rtc_controller.py
+- tictactoe_bot.py
+"""
+
 # Standard library
 import datetime
 import time
@@ -84,7 +92,6 @@ class TicTacToeBot:
         # (Optional) Show board img that will be sent to VLM
         if self.cfg.show_board_images:
             plt.imshow(img)
-            print("showing board image")
             plt.show()
 
         # (Optional) Save all images used
