@@ -8,7 +8,6 @@ from queue import Empty, Queue
 
 # Local modules
 from backend_client import (
-    get_player_turn,
     send_telemetry,
 )
 from eval_lerobot import Gr00tRobotInferenceClient
@@ -32,6 +31,7 @@ class RTCMotionController:
         action_queue: Queue,
         control_dt: float,
         smoothing_factor: float,
+        turn_event: threading.Event,
     ):
         self.robot = robot
         self.client = client
@@ -39,6 +39,7 @@ class RTCMotionController:
         self.action_queue = action_queue
         self.control_dt = control_dt
         self.smoothing_factor = smoothing_factor
+        self.turn_event = turn_event
 
     def start(self, language_instruction: str):
         # Launch loops
@@ -54,7 +55,7 @@ class RTCMotionController:
         control_thread.join()
 
     def _inference_loop(self, language_instruction: str):
-        while not get_player_turn():
+        while not self.turn_event.is_set():
             try:
                 obs = self.get_obs()
                 action_chunk = self.client.get_action(obs, language_instruction)
@@ -70,7 +71,7 @@ class RTCMotionController:
 
     def _control_loop(self):
         last_action = None
-        while not get_player_turn():
+        while not self.turn_event.is_set():
             try:
                 action = self.action_queue.get(timeout=0.1)
             except Empty:

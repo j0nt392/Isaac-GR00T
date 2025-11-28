@@ -1,4 +1,5 @@
 # Standard library
+import threading
 import time
 from queue import Queue
 
@@ -23,6 +24,7 @@ class TicTacToeBot:
     def __init__(self, cfg: TicTacToeConfig):
         self.cfg = cfg
         self.game_state = "ongoing"  # ["win", "loss", "draw", "ongoing"] Start as "ongoing" always
+        self.turn_event = threading.Event()
 
         # Bot components
         self.vlm_client = VLMClient()
@@ -85,12 +87,24 @@ class TicTacToeBot:
             action_queue=self.action_queue,
             control_dt=self.control_dt,
             smoothing_factor=self.smoothing_factor,
+            turn_event=self.turn_event,
         )
 
         rtc.start(language_instruction)
 
     # ------------------------ Main Loop ------------------------
     def run(self) -> None:
+        """
+        Main loop of the TicTacToeBot.
+
+        - Starts the robot and camera system.
+        - Alternates turns between the human player and the robot.
+        - On the player's turn: waits for input, clears action queue.
+        - On the robot's turn: retrieves latest camera observation, uses VLM to predict move,
+        and executes the move using RTCMotionController.
+        - Continues until the game reaches a terminal state (win, loss, or draw).
+        - Cleans up threads and disconnects the robot on completion.
+        """
         self.robot.connect()
         self.camera_system.start()
 
@@ -99,12 +113,14 @@ class TicTacToeBot:
 
         while self.game_state == "ongoing":
             if get_player_turn():
+                self.turn_event.set()
                 if not player_prompted:
                     self.handle_pause()
                     player_prompted = True
                     self.wait_until_player_turn(False)
                     time.sleep(0.1)
             else:
+                self.turn_event.clear()
                 self.handle_resume()
                 player_prompted = False
                 set_player_turn(True)

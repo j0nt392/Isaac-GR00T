@@ -15,12 +15,16 @@ class CameraSystem:
         self.last_observation = None
 
         self.stop_event = threading.Event()
-        self._camera_thread = threading.Thread(target=self._camera_loop, daemon=True)
-        self._interface_thread = threading.Thread(target=self._interface_display_loop, daemon=True)
+        self._camera_thread = None
+        self._interface_thread = None
 
     def start(self):
         """Start camera capture and interface display threads."""
         self.stop_event.clear()
+
+        self._camera_thread = threading.Thread(target=self._camera_loop, daemon=True)
+        self._interface_thread = threading.Thread(target=self._interface_display_loop, daemon=True)
+
         self._camera_thread.start()
         self._interface_thread.start()
 
