@@ -60,7 +60,7 @@ class TicTacToeBot:
 
         # Retrieve latest camera frame for VLM inference
         obs = self.camera_system.get_latest_obs()
-        img = prepare_frame_for_vlm(obs)
+        img = prepare_frame_for_vlm(obs, self.cfg)
 
         move_dict = self.vlm_client.generate_vla_prompt(img, self.cfg.reasoning_effort)
         send_reasoning(move_dict)

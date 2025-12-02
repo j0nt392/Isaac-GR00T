@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # Local modules
+from config import TicTacToeConfig
 
 
 def print_green(text):
@@ -58,7 +59,7 @@ def enhance_image(img: np.ndarray) -> np.ndarray:
     return enhanced
 
 
-def prepare_frame_for_vlm(self, obs: dict) -> np.ndarray:
+def prepare_frame_for_vlm(obs: dict, cfg: TicTacToeConfig) -> np.ndarray:
     """
     Preprocesses an image before sending it to VLM for board analysis.
     The image is projected to BEV for a better perspective of the board, and then optionally enhanced by emphasizing contrast.
@@ -67,13 +68,13 @@ def prepare_frame_for_vlm(self, obs: dict) -> np.ndarray:
     img_raw = obs.get("front")
     img_bev = project_image_to_bev(img_raw)
     img = img_bev
-    if self.cfg.enhance_images:
+    if cfg.enhance_images:
         img = enhance_image(img_bev)
-    if self.cfg.show_board_images:
+    if cfg.show_board_images:
         print("Showing board image")
         plt.imshow(img)
         plt.show()
-    if self.cfg.save_images:
+    if cfg.save_images:
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         save_images({"raw": img_raw, "bev": img_bev, "enhanced": img}, timestamp)
 
