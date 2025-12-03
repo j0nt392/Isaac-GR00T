@@ -166,31 +166,43 @@ class Gr00tRobotInferenceClient:
 
 
 ######################### RTC Merge Function ####################################
-
-
 def merge_with_queue(action_queue: Queue, new_chunk: list[dict[str, float]], overlap: int = 4):
     """
-    Merge new actions into the existing queue using RTC-style blending.
-    Only blends actions that haven't been sent yet, updates in place.
+    Thread-safe merge of new actions into the existing queue with exponential RTC blending.
+    Rebuilds the queue safely to prevent abrupt jumps caused by concurrent access.
     """
-    current_actions = action_queue.queue  # direct access to deque
-    remaining_actions = len(current_actions)
-    actual_overlap = min(overlap, remaining_actions, len(new_chunk))
 
-    # Blend overlap region in place
-    for i in range(actual_overlap):
-        alpha = np.exp(-i / actual_overlap)  # exponential decay
-        blended = {
-            k: alpha * current_actions[-actual_overlap + i][k] + (1 - alpha) * new_chunk[i][k]
-            for k in current_actions[-actual_overlap + i]
-        }
-        current_actions[-actual_overlap + i] = blended
-
-    # Append remaining new actions if space allows
-    for act in new_chunk[actual_overlap:]:
-        if len(current_actions) >= action_queue.maxsize:
+    # 1. Extract all queued actions (safe, drains queue)
+    existing = []
+    while not action_queue.empty():
+        try:
+            existing.append(action_queue.get_nowait())
+        except Empty:
             break
-        current_actions.append(act)
+
+    remaining = len(existing)
+    actual_overlap = min(overlap, remaining, len(new_chunk))
+
+    # 2. Blend overlap region
+    if actual_overlap > 0:
+        for i in range(actual_overlap):
+            # exponential decay, smooth as butter
+            alpha = np.exp(-i / actual_overlap)
+
+            old_act = existing[remaining - actual_overlap + i]
+            new_act = new_chunk[i]
+
+            blended = {k: alpha * old_act[k] + (1 - alpha) * new_act[k] for k in old_act}
+            existing[remaining - actual_overlap + i] = blended
+
+    # 3. Append remaining new actions
+    merged = existing + new_chunk[actual_overlap:]
+
+    # 4. Requeue everything safely
+    for action in merged:
+        if action_queue.full():
+            break
+        action_queue.put_nowait(action)
 
 
 #################################################################################

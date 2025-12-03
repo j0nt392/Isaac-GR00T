@@ -90,7 +90,6 @@ class TicTacToeBot:
             action_queue=self.action_queue,
             control_dt=self.control_dt,
             smoothing_factor=self.smoothing_factor,
-            turn_event=self.turn_event,
         )
 
         rtc.start(language_instruction)

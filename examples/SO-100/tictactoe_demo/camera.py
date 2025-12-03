@@ -32,8 +32,8 @@ class CameraSystem:
     def stop(self):
         """Stop both threads and wait for them to finish."""
         self.stop_event.set()
-        self._camera_thread.join(timeout=1.0)
-        self._interface_thread.join(timeout=1.0)
+        self._camera_thread.join()
+        self._interface_thread.join()
 
     def get_latest_obs(self) -> dict:
         """Return the most recent observation, falling back to last frame if queue is empty."""
