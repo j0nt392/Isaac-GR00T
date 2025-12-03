@@ -7,8 +7,9 @@ from lerobot.robots.robot import Robot
 
 
 class CameraSystem:
-    def __init__(self, robot: Robot, fps: float):
+    def __init__(self, robot: Robot, robot_lock: threading.Lock, fps: float):
         self.robot = robot
+        self.robot_lock = robot_lock
         self.fps = fps
 
         self.camera_queue: Queue[dict] = Queue(maxsize=1)
@@ -50,7 +51,8 @@ class CameraSystem:
         """
         while not self.stop_event.is_set():
             try:
-                obs = self.robot.get_observation()
+                with self.robot_lock:
+                    obs = self.robot.get_observation()
             except Exception:
                 continue  # skip frame if port busy / packet error
             self.last_observation = obs

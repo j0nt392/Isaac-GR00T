@@ -1,4 +1,5 @@
 # Standard library
+import json
 import threading
 import time
 from queue import Queue
@@ -23,19 +24,20 @@ GAME_RESULT = {
 class TicTacToeBot:
     def __init__(self, cfg: TicTacToeConfig):
         self.cfg = cfg
-        self.game_state = "ongoing"  # ["win", "loss", "draw", "ongoing"] Start as "ongoing" always
+        self.game_state = "ongoing"  # ["win", "loss", "draw", "ongoing"] Always start as "ongoing"
         self.turn_event = threading.Event()
 
         # Bot components
         self.vlm_client = VLMClient()
         self.robot = make_robot_from_config(cfg.robot)  # initialize robot arm
+        self.robot_lock = threading.Lock()
         self.client = Gr00tRobotInferenceClient(  # initialize gr00t client
             host=cfg.policy_host,
             port=cfg.policy_port,
             camera_keys=list(cfg.robot.cameras.keys()),
             robot_state_keys=list(self.robot._motors_ft.keys()),
         )
-        self.camera_system = CameraSystem(self.robot, cfg.camera_fps)
+        self.camera_system = CameraSystem(self.robot, self.robot_lock, cfg.camera_fps)
 
         # Action queue
         self.action_queue: Queue[dict[str, float]] = Queue(maxsize=cfg.action_horizon)
@@ -64,7 +66,7 @@ class TicTacToeBot:
 
         move_dict = self.vlm_client.generate_vla_prompt(img, self.cfg.reasoning_effort)
         send_reasoning(move_dict)
-        print_green(f" 🤖 Bot's decision: {move_dict['action']}")
+        print_green(f" 🤖 Bot's reasoning: {json.dumps(move_dict, indent=4)}")
 
         state, action = move_dict["game_state"], move_dict["action"]
         self.game_state = state
@@ -83,6 +85,7 @@ class TicTacToeBot:
         rtc = RTCMotionController(
             robot=self.robot,
             client=self.client,
+            robot_lock=self.robot_lock,
             get_obs=self.camera_system.get_latest_obs,
             action_queue=self.action_queue,
             control_dt=self.control_dt,
