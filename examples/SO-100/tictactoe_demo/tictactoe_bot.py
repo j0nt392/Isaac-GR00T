@@ -8,6 +8,7 @@ from queue import Queue
 from backend_client import get_player_turn, send_reasoning, set_player_turn
 from camera import CameraSystem
 from config import TicTacToeConfig
+from debug_display import DebugDisplay
 from eval_lerobot import Gr00tRobotInferenceClient
 from lerobot.robots import make_robot_from_config  # noqa: F401
 from rtc_controller import RTCMotionController
@@ -46,6 +47,9 @@ class TicTacToeBot:
         self.control_dt = 1.0 / cfg.control_hz
         self.smoothing_factor = cfg.action_smoothing_factor
 
+        # Debug display
+        self.debug_display = DebugDisplay()
+
     # ------------------ Game State Helpers ------------------
     def wait_until_player_turn(self, expected: bool) -> None:
         while get_player_turn() != expected:
@@ -62,7 +66,7 @@ class TicTacToeBot:
 
         # Retrieve latest camera frame for VLM inference
         obs = self.camera_system.get_latest_obs()
-        img = prepare_frame_for_vlm(obs, self.cfg)
+        img = prepare_frame_for_vlm(obs, self.cfg, self.debug_display)
 
         move_dict = self.vlm_client.generate_vla_prompt(img, self.cfg.reasoning_effort)
         send_reasoning(move_dict)
