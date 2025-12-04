@@ -26,23 +26,57 @@ def print_blue(text):
     print(f"\033[94m{text}\033[0m")
 
 
-def project_image_to_bev(img: np.ndarray) -> np.ndarray:
-    # Source points (corners of the board in the original image)
-    pts_src = np.float32(
-        [
-            [277, 62],  # top-left
-            [519, 140],  # top-right
-            [413, 379],  # bottom-right
-            [126, 252],  # bottom-left
-        ]
-    )
-    # Destination points (perfect square board)
-    pts_dst = np.float32([[0, 0], [600, 0], [600, 600], [0, 600]])
-    # Compute perspective transform matrix
-    M = cv2.getPerspectiveTransform(pts_src, pts_dst)
-    # Apply warp
-    warped = cv2.warpPerspective(img, M, (600, 600))
+def order_points(pts):
+    rect = np.zeros((4, 2), dtype="float32")
+    s = pts.sum(axis=1)
+    diff = np.diff(pts, axis=1)
 
+    rect[0] = pts[np.argmin(s)]  # top-left
+    rect[1] = pts[np.argmin(diff)]  # top-right
+    rect[2] = pts[np.argmax(s)]  # bottom-right
+    rect[3] = pts[np.argmax(diff)]  # bottom-left
+    return rect
+
+
+def project_image_to_bev(img: np.ndarray) -> np.ndarray:
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    # Apply Gaussian blur to reduce noise
+    blur = cv2.GaussianBlur(gray, (5, 5), 0)
+
+    # Use Canny edge detection
+    edges = cv2.Canny(blur, 50, 150)
+
+    # Find contours
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # Loop over contours and find the largest quadrilateral
+    board_contour = None
+    max_area = 0
+    for cnt in contours:
+        # Approximate contour to polygon
+        epsilon = 0.02 * cv2.arcLength(cnt, True)
+        approx = cv2.approxPolyDP(cnt, epsilon, True)
+
+        # Check if it's a quadrilateral
+        if len(approx) == 4:
+            area = cv2.contourArea(approx)
+            if area > max_area:
+                max_area = area
+                board_contour = approx
+
+    if board_contour is not None:
+        pts_src = np.float32(board_contour.reshape(4, 2))
+        print("Applying BEV transformation. Detected corners:", pts_src)
+    else:
+        print("⚠️ WARNING: Could not detect board quadrilateral. Returning original image.")
+        return img.copy()
+
+    pts_src = order_points(pts_src)
+
+    pts_dst = np.float32([[0, 0], [600, 0], [600, 600], [0, 600]])
+    M = cv2.getPerspectiveTransform(pts_src, pts_dst)
+    warped = cv2.warpPerspective(img, M, (600, 600))
     return warped
 
 
