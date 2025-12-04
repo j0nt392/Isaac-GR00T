@@ -2,6 +2,7 @@
 import base64
 import datetime
 import json
+import os
 import time
 
 # Third-party libraries
@@ -11,6 +12,8 @@ import numpy as np
 # Local modules
 from backend_client import send_reasoning_chunk
 from config import DEFAULT_MOVE, EXPECTED_RESPONSE_FORMAT, OPEN_AI_API_KEY
+from google import genai
+from google.genai import types
 from openai import OpenAI
 from utils import print_yellow
 
@@ -24,25 +27,13 @@ class VLMClient:
         json_format = json.dumps(EXPECTED_RESPONSE_FORMAT, indent=4)
         prompt = f"""
         You are X in a game of Tic-Tac-Toe. The input image shows the current 3×3 board.
-        Your goal is to choose the strongest legal move and win.
+        Your goal is to choose the strongest move and win.
 
         Your response should be a JSON object as follows:
         {json_format}
 
         Rules and constraints:
-        - X is your mark; O is the opponent.
-        - Legal moves are ONLY empty squares. Never place X on an occupied square.
         - The "action" format should be: "Place the X in the <position> box", where <position> can be center, top-right, bottom-left, etc.
-        - Decision policy (apply in order):
-        1) If you can win this turn, do it.
-        2) Else if the opponent can win next turn, block it.
-        3) Else create a fork (two simultaneous threats).
-        4) Else block the opponent’s fork.
-        5) Else take center if empty.
-        6) Else take the opposite corner of the opponent if available.
-        7) Else take any empty corner.
-        8) Else take any empty side.
-        - Before finalizing, double-check the chosen square is empty in the image. If not, pick the next-best legal move.
         - If the game is already over (X or O has three-in-a-row, or no empty squares), set:
             - "game_state" to 'win', 'draw', or 'loss' (from X’s perspective)
             - "action" to "N/A"
@@ -70,6 +61,79 @@ class VLMClient:
         turn_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
         move_dict = {}
+        model_name = "gemini-2.5-flash"
+        # --- GEMINI IMPLEMENTATION ---
+        if "gemini" in model_name.lower():
+            api_key = os.environ.get("GEMINI_API_KEY")
+            if not api_key:
+                print_yellow(" ⚠️ GEMINI_API_KEY not found.")
+                return DEFAULT_MOVE
+
+            client = genai.Client(api_key=api_key)
+            turn_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+
+            # Encode image
+            success, encoded_jpg = cv2.imencode(".jpg", cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+            if not success:
+                print_yellow(" ⚠️ Failed to encode image")
+                return DEFAULT_MOVE
+
+            contents = [
+                types.Content(
+                    role="user",
+                    parts=[
+                        types.Part.from_text(text=self.prompt),
+                        types.Part.from_bytes(data=encoded_jpg.tobytes(), mime_type="image/jpeg"),
+                    ],
+                ),
+            ]
+
+            # Configure Thinking + JSON
+            generate_content_config = types.GenerateContentConfig(
+                response_mime_type="application/json",
+                thinking_config=types.ThinkingConfig(include_thoughts=True, thinking_budget=10000),
+            )
+
+            try:
+                stream = client.models.generate_content_stream(
+                    model=model_name,
+                    contents=contents,
+                    config=generate_content_config,
+                )
+
+                full_json_text = ""
+                for chunk in stream:
+                    # Safety check for candidates structure
+                    if (
+                        not chunk.candidates
+                        or not chunk.candidates[0].content
+                        or not chunk.candidates[0].content.parts
+                    ):
+                        continue
+
+                    for part in chunk.candidates[0].content.parts:
+                        text_part = part.text or ""
+                        if not text_part:
+                            continue
+
+                        # Stream everything to UI for visibility
+                        send_reasoning_chunk(text_part, done=False, turn_id=turn_id)
+
+                        # Only accumulate non-thought parts for JSON parsing
+                        if not getattr(part, "thought", False):
+                            full_json_text += text_part
+
+                send_reasoning_chunk("", done=True, turn_id=turn_id)
+
+                # Parse only the accumulated JSON answer
+                cleaned = full_json_text.replace("", "").replace("```", "").strip()
+                move_dict = json.loads(cleaned)
+                self._validate_move_dict(move_dict)
+                return move_dict
+
+            except Exception as e:
+                print_yellow(f" ⚠️ Gemini Error: {e}")
+                return DEFAULT_MOVE
 
         stream = self.client.responses.create(
             model="gpt-5",

@@ -7,11 +7,11 @@ import sys
 
 # Third-party libraries
 import cv2
-import matplotlib.pyplot as plt
 import numpy as np
 
 # Local modules
 from config import TicTacToeConfig
+from debug_display import DebugDisplay
 
 
 def print_green(text):
@@ -26,19 +26,7 @@ def print_blue(text):
     print(f"\033[94m{text}\033[0m")
 
 
-def order_points(pts):
-    rect = np.zeros((4, 2), dtype="float32")
-    s = pts.sum(axis=1)
-    diff = np.diff(pts, axis=1)
-
-    rect[0] = pts[np.argmin(s)]  # top-left
-    rect[1] = pts[np.argmin(diff)]  # top-right
-    rect[2] = pts[np.argmax(s)]  # bottom-right
-    rect[3] = pts[np.argmax(diff)]  # bottom-left
-    return rect
-
-
-def project_image_to_bev(img: np.ndarray) -> np.ndarray:
+def _project_image_to_bev(img: np.ndarray) -> np.ndarray:
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
     # Apply Gaussian blur to reduce noise
@@ -80,6 +68,107 @@ def project_image_to_bev(img: np.ndarray) -> np.ndarray:
     return warped
 
 
+def order_points(pts):
+    rect = np.zeros((4, 2), dtype="float32")
+    s = pts.sum(axis=1)
+    diff = np.diff(pts, axis=1)
+    rect[0] = pts[np.argmin(s)]  # top-left
+    rect[2] = pts[np.argmax(s)]  # bottom-right
+    rect[1] = pts[np.argmin(diff)]  # top-right
+    rect[3] = pts[np.argmax(diff)]  # bottom-left
+    return rect
+
+
+def edge_length_score(quad):
+    """Compute score of quadrilateral based on sum of edge lengths"""
+    pts = quad.reshape(4, 2)
+    score = 0
+    for i in range(4):
+        p1 = pts[i]
+        p2 = pts[(i + 1) % 4]
+        score += np.linalg.norm(p2 - p1)
+    return score
+
+
+def detect_board_contour(img: np.ndarray, debug_display=None):
+    """
+    Detect the board by choosing the quadrilateral with the longest edges.
+    Displays all intermediate steps using debug_display.
+    """
+    h, w = img.shape[:2]
+    pts_src = np.float32([[261, 51], [559, 140], [396, 464], [50, 279]])
+    first_warp = project_image_to_bev(img, pts_src)
+    # Step 1: Grayscale + blur
+    gray = cv2.cvtColor(first_warp, cv2.COLOR_BGR2GRAY)
+
+    # Step 2: Canny edges
+    edges = cv2.Canny(gray, 50, 150)
+    if debug_display:
+        debug_display.show_image(cv2.cvtColor(edges, cv2.COLOR_GRAY2RGB), title="Canny Edges")
+
+    # Step 3: Find all external contours
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if debug_display:
+        contour_img = img.copy()
+        cv2.drawContours(contour_img, contours, -1, (0, 255, 0), 2)
+        debug_display.show_image(contour_img, title="All Contours")
+
+    # Step 4: Approximate polygons and keep only quadrilaterals
+    quads = []
+    for cnt in contours:
+        epsilon = 0.02 * cv2.arcLength(cnt, True)
+        approx = cv2.approxPolyDP(cnt, epsilon, True)
+        if len(approx) == 4:
+            quads.append(approx)
+
+    if debug_display:
+        quad_img = img.copy()
+        cv2.drawContours(quad_img, quads, -1, (255, 0, 0), 2)
+        debug_display.show_image(quad_img, title="All Quadrilaterals")
+
+    if not quads:
+        print("⚠️ WARNING: No quadrilaterals found. Returning raw image.")
+        return None
+
+    # Step 5: Score quadrilaterals by total edge length
+    scored_quads = [(edge_length_score(q), q) for q in quads]
+    scored_quads.sort(key=lambda x: x[0], reverse=True)
+    board_contour = scored_quads[0][1]
+
+    if debug_display:
+        board_img = img.copy()
+        cv2.polylines(board_img, [board_contour], True, (0, 0, 255), 3)
+        debug_display.show_image(board_img, title="Selected Quadrilateral")
+
+    # Step 6: Order corners
+    pts_src = np.float32(board_contour.reshape(4, 2))
+    pts_src = order_points(pts_src)
+
+    if debug_display:
+        ordered_img = img.copy()
+        for i, p in enumerate(pts_src):
+            cv2.circle(ordered_img, tuple(p.astype(int)), 10, (0, 255, 0), -1)
+            cv2.putText(
+                ordered_img,
+                str(i),
+                tuple(p.astype(int) + np.array([10, -10])),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (0, 255, 0),
+                2,
+            )
+        debug_display.show_image(ordered_img, title="Ordered Corners (0=TL,1=TR,2=BR,3=BL)")
+
+    return pts_src
+
+
+def project_image_to_bev(img: np.ndarray, pts_src: np.ndarray, bev_size=(600, 600)):
+    pts_dst = np.float32([[0, 0], [bev_size[0], 0], [bev_size[0], bev_size[1]], [0, bev_size[1]]])
+    M = cv2.getPerspectiveTransform(pts_src, pts_dst)
+    warped = cv2.warpPerspective(img, M, bev_size)
+    return warped
+
+
 def enhance_image(img: np.ndarray) -> np.ndarray:
     # Convert to grayscale for morphology
     gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
@@ -93,26 +182,61 @@ def enhance_image(img: np.ndarray) -> np.ndarray:
     return enhanced
 
 
-def prepare_frame_for_vlm(obs: dict, cfg: TicTacToeConfig) -> np.ndarray:
+def prepare_frame_for_vlm(
+    obs: dict, cfg: TicTacToeConfig, debug_display: DebugDisplay
+) -> np.ndarray:
     """
     Preprocesses an image before sending it to VLM for board analysis.
     The image is projected to BEV for a better perspective of the board, and then optionally enhanced by emphasizing contrast.
     The raw, bev and enhanced images are optionally saved.
     """
     img_raw = obs.get("front")
-    img_bev = project_image_to_bev(img_raw)
+    pts_src = np.float32([[261, 51], [559, 140], [396, 464], [50, 279]])
+    img_bev = project_image_to_bev(img_raw, pts_src)
     img = img_bev
     if cfg.enhance_images:
         img = enhance_image(img_bev)
     if cfg.show_board_images:
-        print("Showing board image")
-        plt.imshow(img)
-        plt.show()
+        debug_display.show_image(img)
     if cfg.save_images:
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         save_images({"raw": img_raw, "bev": img_bev, "enhanced": img}, timestamp)
 
     return img
+
+
+# Main preprocessing function
+def _prepare_frame_for_vlm(obs: dict, cfg, debug_display=None):
+    img_raw = obs.get("front")
+
+    # Detect corners
+    pts_src = detect_board_contour(img_raw, debug_display=debug_display)
+    if pts_src is None:
+        warped = img_raw.copy()
+        if debug_display:
+            debug_display.show_image(warped, title="Fallback: Original Image")
+        return warped
+
+    # BEV warp
+    img_bev = project_image_to_bev(img_raw, pts_src)
+    if debug_display:
+        debug_display.show_image(img_bev, title="Warped BEV")
+
+    img_final = img_bev
+    if cfg.enhance_images:
+        img_final = enhance_image(img_bev)
+        if debug_display:
+            img_rgb = cv2.cvtColor(img_final, cv2.COLOR_GRAY2RGB)
+            debug_display.show_image(img_rgb, title="Enhanced Image")
+
+    if cfg.save_images:
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        save_images({"raw": img_raw, "bev": img_bev, "enhanced": img_final}, timestamp)
+
+    if cfg.show_board_images and debug_display:
+        debug_display.show_image(img_final, title="Final Output")
+
+    return img_final
 
 
 def save_images(images: dict, timestamp: str) -> None:
