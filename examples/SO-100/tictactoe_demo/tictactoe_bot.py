@@ -23,31 +23,47 @@ GAME_RESULT = {
 
 
 class TicTacToeBot:
-    def __init__(self, cfg: TicTacToeConfig):
-        self.cfg = cfg
-        self.game_state = "ongoing"  # ["win", "loss", "draw", "ongoing"] Always start as "ongoing"
-        self.turn_event = threading.Event()
+    """
+    High-level controller for the Tic-Tac-Toe robot system.
 
-        # Bot components
+    This class ties together:
+    - robot hardware
+    - camera system
+    - vision-language model and policy inference clients
+    - real-time control components (RTC)
+    - game state and turn synchronization
+
+    It does not execute motion itself; motion is handled by RTCMotionController.
+    This class acts as the orchestrator for gameplay.
+    """
+
+    def __init__(self, cfg: TicTacToeConfig):
+        # Configuration and game state
+        self.cfg = cfg
+        self.game_state = "ongoing"  # one of: ["win", "loss", "draw", "ongoing"]
+
+        # Vision-language client (board analysis and reasoning)
         self.vlm_client = VLMClient()
-        self.robot = make_robot_from_config(cfg.robot)  # initialize robot arm
-        self.robot_lock = threading.Lock()
-        self.client = Gr00tRobotInferenceClient(  # initialize gr00t client
+
+        # Robot hardware and synchronization
+        self.robot = make_robot_from_config(cfg.robot)
+        self.robot_lock = threading.Lock()  # prevents concurrent robot access
+
+        # Policy/action inference client (GR00T)
+        self.client = Gr00tRobotInferenceClient(
             host=cfg.policy_host,
             port=cfg.policy_port,
             camera_keys=list(cfg.robot.cameras.keys()),
             robot_state_keys=list(self.robot._motors_ft.keys()),
         )
+
+        # Camera subsystem (captures images in sync with robot motion for interface)
         self.camera_system = CameraSystem(self.robot, self.robot_lock, cfg.camera_fps)
 
-        # Action queue
+        # Shared action queue (used by inference and control loops)
         self.action_queue: Queue[dict[str, float]] = Queue(maxsize=cfg.action_horizon)
 
-        # Action control parameters
-        self.control_dt = 1.0 / cfg.control_hz
-        self.smoothing_factor = cfg.action_smoothing_factor
-
-        # Debug display
+        # Optional debugging interface (visualizations, diagnostics)
         self.debug_display = DebugDisplay()
 
     # ------------------ Game State Helpers ------------------
@@ -92,8 +108,11 @@ class TicTacToeBot:
             robot_lock=self.robot_lock,
             get_obs=self.camera_system.get_latest_obs,
             action_queue=self.action_queue,
-            control_dt=self.control_dt,
-            smoothing_factor=self.smoothing_factor,
+            action_horizon=self.cfg.action_horizon,
+            control_loop_interval=1.0 / self.cfg.control_hz,
+            action_smoothing_factor=self.cfg.action_smoothing_factor,
+            rtc_overlap=self.cfg.rtc_overlap,
+            action_queue_threshold=self.cfg.action_queue_threshold,
         )
 
         rtc.start(language_instruction)
@@ -119,14 +138,12 @@ class TicTacToeBot:
 
         while self.game_state == "ongoing":
             if get_player_turn():
-                self.turn_event.set()
                 if not player_prompted:
                     self.handle_pause()
                     player_prompted = True
                     self.wait_until_player_turn(False)
                     time.sleep(0.1)
             else:
-                self.turn_event.clear()
                 self.handle_resume()
                 player_prompted = False
                 set_player_turn(True)
