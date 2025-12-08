@@ -64,7 +64,7 @@ class TicTacToeBot:
         self.action_queue: Queue[dict[str, float]] = Queue(maxsize=cfg.action_horizon)
 
         # Optional debugging interface (visualizations, diagnostics)
-        self.debug_display = DebugDisplay()
+        self.debug_display = DebugDisplay() if cfg.show_board_images else None
 
     # ------------------ Game State Helpers ------------------
     def wait_until_player_turn(self, expected: bool) -> None:
