@@ -116,11 +116,14 @@ class VLMClient:
                         if not text_part:
                             continue
 
-                        # Stream everything to UI for visibility
-                        send_reasoning_chunk(text_part, done=False, turn_id=turn_id)
+                        # Check if this part is a thought
+                        is_thought = getattr(part, "thought", False)
 
-                        # Only accumulate non-thought parts for JSON parsing
-                        if not getattr(part, "thought", False):
+                        if is_thought:
+                            # Stream thoughts to UI
+                            send_reasoning_chunk(text_part, done=False, turn_id=turn_id)
+                        else:
+                            # Accumulate JSON answer (don't stream to UI)
                             full_json_text += text_part
 
                 send_reasoning_chunk("", done=True, turn_id=turn_id)
