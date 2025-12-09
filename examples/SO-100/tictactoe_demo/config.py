@@ -14,8 +14,8 @@ BACKEND_URL = os.getenv("BACKEND_URL")
 OPEN_AI_API_KEY = os.getenv("OPEN_AI_API_KEY")
 
 EXPECTED_RESPONSE_FORMAT = {
-    "observation": "<short text describing your observation of the board state>",
-    "reasoning": "<short text describing your reasoning for the next move>",
+    "observation": "<short text describing your observation of the board state in words (no ASCII art or such, just semantically), maximum 15 words>",
+    "reasoning": "<short text describing your reasoning for the next move, maximum 15 words>",
     "action": "<your next move in the format described below, or 'N/A' if no moves remain>",
     "game_state": "<one of ['win', 'draw', 'loss', 'ongoing'] representing the state of the game from X’s perspective>",
 }

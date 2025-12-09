@@ -5,7 +5,12 @@ import time
 from queue import Queue
 
 # Local modules
-from backend_client import get_player_turn, send_reasoning, set_player_turn
+from backend_client import (
+    get_player_turn,
+    send_reasoning,
+    set_judge_status,
+    set_player_turn,
+)
 from camera import CameraSystem
 from config import TicTacToeConfig
 from debug_display import DebugDisplay
@@ -99,10 +104,8 @@ class TicTacToeBot:
         # Execute move. Perform the action steps using real-time chunking
         self._start_rtc_for_move(action)
 
-        # System busy point: give the VLM time to analyze the game post-move before player's turn -
-        # set_processing_status(True)
-
         # --- STEP 2: POST-MOVE ANALYSIS ---
+        set_judge_status(True)
         # Retrieve camera frame after move
         obs_post = self.camera_system.get_latest_obs()
         print_green("Sending second frame to vlm")
@@ -110,8 +113,11 @@ class TicTacToeBot:
 
         # Get the game state after the move
         move_dict_2 = self.vlm_client.get_post_move_state(img_post, self.cfg.reasoning_effort)
+        move_dict_2["visible"] = False
         send_reasoning(move_dict_2)
         print_green(f" 🤖 Bot's post-move analysis (step 2): {json.dumps(move_dict_2, indent=4)}")
+
+        set_judge_status(False)
         # Update the game state and check if game is over
         self.game_state = move_dict_2.get("game_state", "ongoing")
         if self.game_state != "ongoing":
