@@ -80,21 +80,45 @@ class TicTacToeBot:
         """Robot's turn: VLM predicts move; then RTC control executes it."""
         print_green(" 🤖 Bot's turn! Thinking...")
 
+        # --- STEP 1: PRE-MOVE ANALYSIS ---
         # Retrieve latest camera frame for VLM inference
         obs = self.camera_system.get_latest_obs()
         img = prepare_frame_for_vlm(obs, self.cfg, self.debug_display)
 
-        move_dict = self.vlm_client.generate_vla_prompt(img, self.cfg.reasoning_effort)
-        send_reasoning(move_dict)
-        print_green(f" 🤖 Bot's reasoning: {json.dumps(move_dict, indent=4)}")
+        # VLM decision (move or game over)
+        move_dict_1 = self.vlm_client.get_move_decision(img, self.cfg.reasoning_effort)
+        send_reasoning(move_dict_1)
+        print_green(f" 🤖 Bot's decision (step 1): {json.dumps(move_dict_1, indent=4)}")
 
-        state, action = move_dict["game_state"], move_dict["action"]
+        state, action = move_dict_1["game_state"], move_dict_1["action"]
         self.game_state = state
+        # Check if game is already over (win, loss, or draw)
         if state != "ongoing" and action == "N/A":
             return
 
-        # Perform the action steps using real-time chunking
+        # Execute move. Perform the action steps using real-time chunking
         self._start_rtc_for_move(action)
+
+        # System busy point: give the VLM time to analyze the game post-move before player's turn -
+        # set_processing_status(True)
+
+        # --- STEP 2: POST-MOVE ANALYSIS ---
+        # Retrieve camera frame after move
+        obs_post = self.camera_system.get_latest_obs()
+        print_green("Sending second frame to vlm")
+        img_post = prepare_frame_for_vlm(obs_post, self.cfg, self.debug_display)
+
+        # Get the game state after the move
+        move_dict_2 = self.vlm_client.get_post_move_state(img_post, self.cfg.reasoning_effort)
+        send_reasoning(move_dict_2)
+        print_green(f" 🤖 Bot's post-move analysis (step 2): {json.dumps(move_dict_2, indent=4)}")
+        # Update the game state and check if game is over
+        self.game_state = move_dict_2.get("game_state", "ongoing")
+        if self.game_state != "ongoing":
+            return
+
+        # End the bot's turn
+        set_player_turn(True)
 
     def _start_rtc_for_move(self, language_instruction: str):
         """
@@ -133,20 +157,15 @@ class TicTacToeBot:
         self.robot.connect()
         self.camera_system.start()
 
-        player_prompted = False
         set_player_turn(True)
 
         while self.game_state == "ongoing":
             if get_player_turn():
-                if not player_prompted:
-                    self.handle_pause()
-                    player_prompted = True
-                    self.wait_until_player_turn(False)
-                    time.sleep(0.1)
+                self.handle_pause()
+                self.wait_until_player_turn(False)  # blocks until turn status changes to False
+                time.sleep(0.1)
             else:
                 self.handle_resume()
-                player_prompted = False
-                set_player_turn(True)
 
         # Cleanup
         self.camera_system.stop()
