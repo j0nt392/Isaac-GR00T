@@ -32,6 +32,7 @@ def send_reasoning(move: dict) -> None:
             "action": str(move.get("action", "")),
             "game_over": bool(move.get("game_over", False)),
             "game_state": str(move.get("game_state", "")),
+            "visible": bool(move.get("visible", True)),
         }
         requests.post(f"{BACKEND_URL}/reasoning", json=payload, timeout=0.3)
     except Exception:
@@ -79,6 +80,13 @@ def get_player_turn() -> bool:
 def set_player_turn(val: bool) -> None:
     try:
         requests.post(f"{BACKEND_URL}/turn_status", json={"player_turn": val}, timeout=0.2)
+    except Exception:
+        pass
+
+
+def set_judge_status(val: bool) -> None:
+    try:
+        requests.post(f"{BACKEND_URL}/judge_status", json={"is_judging": val}, timeout=0.2)
     except Exception:
         pass
 

@@ -93,7 +93,7 @@ class VLMClient:
 
     # --- VLM Implementation Details ---
 
-    def _call_gemini(self, img: np.ndarray, prompt: str) -> dict:
+    def _call_gemini(self, img: np.ndarray, prompt: str, stream_reasoning: bool = True) -> dict:
         """Handles streaming call to the Gemini API."""
         api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
@@ -151,12 +151,14 @@ class VLMClient:
                     is_thought = getattr(part, "thought", False)
 
                     if is_thought:
-                        send_reasoning_chunk(text_part, done=False, turn_id=turn_id)
+                        if stream_reasoning:
+                            send_reasoning_chunk(text_part, done=False, turn_id=turn_id)
                     elif not is_thought:
                         # Accumulate JSON answer
                         full_json_text += text_part
 
-            send_reasoning_chunk("", done=True, turn_id=turn_id)
+            if stream_reasoning:
+                send_reasoning_chunk("", done=True, turn_id=turn_id)
 
             # Parse and validate
             cleaned = full_json_text.replace("", "").replace("```", "").strip()
@@ -167,7 +169,9 @@ class VLMClient:
             print_yellow(f" ⚠️ Gemini Error: {e}")
             return DEFAULT_MOVE  # Fallback if error occurred
 
-    def _call_openai(self, img: np.ndarray, prompt: str, reasoning_effort: str) -> dict:
+    def _call_openai(
+        self, img: np.ndarray, prompt: str, reasoning_effort: str, stream_reasoning: bool = True
+    ) -> dict:
         """Handles streaming call to the OpenAI API (or similar non-Gemini VLM)."""
         encoded_img = self._encode_image_to_base64(img)
         turn_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -198,7 +202,7 @@ class VLMClient:
             # Live "thinking" summary (only for Step 1)
             if "response.reasoning_summary_text.delta" in t:
                 delta = getattr(ev, "delta", "") or ""
-                if delta:
+                if delta and stream_reasoning:
                     send_reasoning_chunk(delta, done=False, turn_id=turn_id)
                     time.sleep(0.1)
                 continue
@@ -215,28 +219,30 @@ class VLMClient:
                 continue
 
             # Close the UI stream for reasoning
-            if t == "response.completed":
+            if t == "response.completed" and stream_reasoning:
                 send_reasoning_chunk("", done=True, turn_id=turn_id)
 
         return move_dict
 
-    def _call_vlm(self, img: np.ndarray, prompt: str, reasoning_effort: str) -> dict:
+    def _call_vlm(
+        self, img: np.ndarray, prompt: str, reasoning_effort: str, stream_reasoning: bool = True
+    ) -> dict:
         """Routes the call to the appropriate VLM implementation."""
         if "gemini" in self.model_name.lower():
-            return self._call_gemini(img, prompt)
+            return self._call_gemini(img, prompt, stream_reasoning)
 
         # Default to OpenAI implementation for other models
-        return self._call_openai(img, prompt, reasoning_effort)
+        return self._call_openai(img, prompt, reasoning_effort, stream_reasoning)
 
     # --- Public VLM Methods (Used by tictactoe_bot.py) ---
 
     def get_move_decision(self, img: np.ndarray, reasoning_effort: str) -> dict:
         """Step 1: Get the strategic decision (action and pre-move state)."""
         print_yellow(" ➡️ Calling VLM: Step 1 (Move Decision)")
-        return self._call_vlm(img, self.prompt_before_move, reasoning_effort)
+        return self._call_vlm(img, self.prompt_before_move, reasoning_effort, stream_reasoning=True)
 
     def get_post_move_state(self, img: np.ndarray, reasoning_effort: str) -> dict:
         """Step 2: Get the post-move game state (win/draw/ongoing)."""
         print_yellow(" ➡️ Calling VLM: Step 2 (Post-Move State Check)")
         # Note: Reasoning is suppressed in the VLM implementations for Step 2
-        return self._call_vlm(img, self.prompt_after_move, reasoning_effort)
+        return self._call_vlm(img, self.prompt_after_move, reasoning_effort, stream_reasoning=False)
