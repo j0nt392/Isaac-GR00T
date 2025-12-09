@@ -45,10 +45,10 @@ class TicTacToeConfig(EvalConfig):
     # ---------------------------
     # 🟦 Real-Time Control Settings
     # ---------------------------
-    action_smoothing_factor: float = 0.6
+    action_smoothing_factor: float = 0.7
     """
     Exponential smoothing between consecutive actions.
-    0.6 → 60% of the previous action, 40% of the new one.
+    E.g. 0.8 → 80% of the previous action, 20% of the new one.
     Higher values = smoother but more sluggish motion.
     """
 
@@ -58,7 +58,7 @@ class TicTacToeConfig(EvalConfig):
     Example: horizon=12, threshold=0.5 → request new chunk when ≤ 6 actions remain.
     """
 
-    control_hz: int = 30
+    control_hz: int = 25
     """
     Frequency (Hz) of robot control updates.
     Determines `control_dt = 1/control_hz`.

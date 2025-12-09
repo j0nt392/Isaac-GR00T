@@ -34,12 +34,18 @@ class VLMClient:
 
         Rules and constraints:
         - The "action" format should be: "Place the X in the <position> box", where <position> can be center, top-right, bottom-left, etc.
-        - If the game is already over (X or O has three-in-a-row, or no empty squares), set:
-            - "game_state" to 'win', 'draw', or 'loss' (from X’s perspective)
-            - "action" to "N/A"
-        - If the game will be over after your move (X completes three-in-a-row or fills the board), set:
-            - "game_state" to 'win' or 'draw'
-            - "action" according to the required format
+
+        - Game-state rules (strict):
+            * Only evaluate the board as it exists before your move and immediately after your move.
+            * Do NOT evaluate hypothetical future play, forks, traps, inevitable wins, or inevitable losses.
+            * The game is considered over only if:
+                1. Before your move, X or O already has three-in-a-row, or no empty squares:
+                    - Set "game_state" to 'win', 'draw', or 'loss' (from X’s perspective)
+                    - Set "action" to "N/A"
+                2. Immediately after your move:
+                    - If your move completes three-in-a-row for X → set "game_state" to 'win'
+                    - If the board becomes full and X did not win → set "game_state" to 'draw'
+                    - In both cases, still provide the "action" describing your move.
 
         Be concise. Output only the JSON — no extra text.
         """
@@ -91,7 +97,7 @@ class VLMClient:
             # Configure Thinking + JSON
             generate_content_config = types.GenerateContentConfig(
                 response_mime_type="application/json",
-                thinking_config=types.ThinkingConfig(include_thoughts=True, thinking_budget=10000),
+                thinking_config=types.ThinkingConfig(include_thoughts=True, thinking_budget=15000),
             )
 
             try:
