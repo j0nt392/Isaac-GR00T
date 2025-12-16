@@ -48,7 +48,7 @@ class TicTacToeBot:
         self.game_state = "ongoing"  # one of: ["win", "loss", "draw", "ongoing"]
 
         # Vision-language client (board analysis and reasoning)
-        self.vlm_client = VLMClient()
+        self.vlm_client = VLMClient(model_name=cfg.vlm_model_name)
 
         # Robot hardware and synchronization
         self.robot = make_robot_from_config(cfg.robot)
@@ -112,7 +112,7 @@ class TicTacToeBot:
         img_post = prepare_frame_for_vlm(obs_post, self.cfg, self.debug_display)
 
         # Get the game state after the move
-        move_dict_2 = self.vlm_client.get_post_move_state(img_post, self.cfg.reasoning_effort)
+        move_dict_2 = self.vlm_client.get_post_move_state(img_post)  # , self.cfg.reasoning_effort)
         move_dict_2["visible"] = False
         send_reasoning(move_dict_2)
         print_green(f" 🤖 Bot's post-move analysis (step 2): {json.dumps(move_dict_2, indent=4)}")

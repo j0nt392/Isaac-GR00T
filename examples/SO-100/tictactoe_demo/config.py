@@ -11,7 +11,9 @@ load_dotenv()
 from eval_lerobot import EvalConfig
 
 BACKEND_URL = os.getenv("BACKEND_URL")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 OPEN_AI_API_KEY = os.getenv("OPEN_AI_API_KEY")
+XAI_API_KEY = os.getenv("XAI_API_KEY")
 
 EXPECTED_RESPONSE_FORMAT = {
     "observation": "<short text describing your observation of the board state in words (no ASCII art or such, just semantically), maximum 15 words>",
@@ -93,11 +95,23 @@ class TicTacToeConfig(EvalConfig):
     """
 
     # ---------------------------
-    # 🟨 Model Reasoning Settings
+    # 🟨 Model Settings
     # ---------------------------
-    reasoning_effort: str = "low"
+    vlm_model_name: str = "gemini-2.5-flash"
     """
-    Controls how hard GPT/Gemini should think about the board state.
-    Options could be: 'low', 'medium', 'high' depending on implementation.
+    The model that will be used to analyze the board and decide the next move.
+    Supported: 
+        'gemini-2.5-flash'
+        'gemini-2.5-pro'
+        'grok-4'
+        'grok-4-fast-non-reasoning'
+        'gpt-5-nano'
+        'o3'
+    """
+
+    reasoning_effort: str = "medium"
+    """
+    Controls how hard the model should think about the board state.
+    Options are: 'low', 'medium', 'high', which are mapped to appropriate levels of reasoning specific to the selected model.
     More effort → slower but more accurate reasoning.
     """
