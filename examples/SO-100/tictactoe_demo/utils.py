@@ -193,11 +193,85 @@ def enhance_image(img: np.ndarray) -> np.ndarray:
     return enhanced
 
 
+def extract_cell_image(img: np.ndarray, row: int, col: int) -> np.ndarray:
+    """
+    Extracts the image of a specific cell from the 3x3 board image.
+    """
+    detection_result = detect_board_contour(img)
+    if detection_result is None:
+        # Use hard-coded fallback points
+        pts_src_raw = FALLBACK_PTS_SRC.copy()
+        pts_src = order_points(pts_src_raw)
+        print_yellow("   -> Using hard-coded fallback points for warp.")
+    else:
+        # Successful detection
+        pts_src, _ = detection_result
+    img_bev = project_image_to_bev(img, pts_src)
+    img_enhanced = enhance_image(img_bev)
+    h, w = img_enhanced.shape[:2]
+    cell_h, cell_w = h // 3, w // 3
+    y1, y2 = row * cell_h, (row + 1) * cell_h
+    y1, y2 = max(0, y1), min(h, y2)
+    x1, x2 = col * cell_w, (col + 1) * cell_w
+    x1, x2 = max(0, x1), min(w, x2)
+    margin = 15
+    cell = img_enhanced[y1 + margin : y2 - margin, x1 + margin : x2 - margin]
+    return cell
+
+
+# =================================
+# PieceDetection Logic
+# =================================
+def is_piece_in_cell(cell_img: np.ndarray, occupancy_thresh: float = 0.02) -> bool:
+    """
+    Detects if there is a piece in the cell based on the number of occupied pixels.
+    """
+    _, thresh = cv2.threshold(cell_img, 200, 255, cv2.THRESH_BINARY)
+    occupied = cv2.countNonZero(thresh)
+    total = cell_img.shape[0] * cell_img.shape[1]
+    ratio = occupied / total
+
+    return ratio > occupancy_thresh
+
+
+def detect_piece_type(cell_img: np.ndarray, min_val: float = 0.835, max_val: float = 1.2) -> str:
+    """
+    Determines whether the piece is 'X or 'O' based on the amount of circularity.
+    """
+    # Find contours
+    _, thresh = cv2.threshold(cell_img, 200, 255, cv2.THRESH_BINARY)
+    # Dilate contours to fix broken shapes
+    kernel = np.ones((3, 3), np.uint8)
+    thresh_dilated = cv2.dilate(thresh, kernel, iterations=1)
+    contours_dilated, _ = cv2.findContours(
+        thresh_dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
+    # Check for O (circle)
+    for cnt in contours_dilated:
+        area = cv2.contourArea(cnt)
+        if area < 50:
+            continue
+        perimeter = cv2.arcLength(cnt, True)
+        if perimeter == 0:
+            continue
+        circularity = 4 * np.pi * area / (perimeter * perimeter)
+        if min_val <= circularity <= max_val:
+            return "O"
+    return "X"
+
+
+def get_position_from_action(action: str) -> str:
+    """
+    Extracts the <position> in which the robot will place the piece.
+    The action must be in the form "Place the X in the <position> box"
+    """
+    s = action.split()
+    return s[-2]
+
+
 # =================================
 # Core Board Detection Logic
 # =================================
-
-
 def _create_quad_visualization(
     img_raw: np.ndarray, pts_src: np.ndarray, title: str, debug_display=None
 ) -> np.ndarray:
@@ -237,7 +311,7 @@ def _create_quad_visualization(
     return selected_quad_img
 
 
-def detect_board_contour(img: np.ndarray, debug_display=None) -> tuple[np.ndarray, float] | None:
+def detect_board_contour(img: np.ndarray) -> tuple[np.ndarray, float] | None:
     """
     Detects the four corner points (pts_src) of the board using Dilation and max-area selection.
     Returns the ordered corner points and the selected area, or None on failure/low confidence.
@@ -330,7 +404,7 @@ def prepare_frame_for_vlm(obs: dict, cfg, debug_display=None):
     selected_area = 0
 
     # --- 1. Detect corners and handle failure/low confidence ---
-    detection_result = detect_board_contour(img_raw, debug_display)
+    detection_result = detect_board_contour(img_raw)
 
     if detection_result is None:
         # Use hard-coded fallback points
