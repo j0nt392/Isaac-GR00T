@@ -23,9 +23,13 @@ MIN_BOARD_AREA_THRESHOLD = 15000
 # Hard-coded source points (manually selected) for fallback BEV warp
 FALLBACK_PTS_SRC = np.float32([[261, 51], [559, 140], [396, 464], [50, 279]])
 
+BOARD_CONTOUR_WARNING_COUNTER = 0  # Number of times contour detection has failed
+SELECTED_AREA_WARNING_COUNTER = 0  # Number of times area confidence has failed
+
+
 # =================================
 # I/O and System Utilities
-# =================================
+# ================================
 
 
 def print_green(text):
@@ -193,16 +197,13 @@ def enhance_image(img: np.ndarray) -> np.ndarray:
     return enhanced
 
 
-def extract_cell_image(img: np.ndarray, row: int, col: int) -> np.ndarray:
+def extract_cell_image(img: np.ndarray, row: int, col: int) -> np.ndarray | None:
     """
     Extracts the image of a specific cell from the 3x3 board image.
     """
     detection_result = detect_board_contour(img)
     if detection_result is None:
-        # Use hard-coded fallback points
-        pts_src_raw = FALLBACK_PTS_SRC.copy()
-        pts_src = order_points(pts_src_raw)
-        print_yellow("   -> Using hard-coded fallback points for warp.")
+        return None
     else:
         # Successful detection
         pts_src, _ = detection_result
@@ -222,16 +223,18 @@ def extract_cell_image(img: np.ndarray, row: int, col: int) -> np.ndarray:
 # =================================
 # PieceDetection Logic
 # =================================
-def is_piece_in_cell(cell_img: np.ndarray, occupancy_thresh: float = 0.02) -> bool:
+
+
+def is_piece_in_cell(cell_img: np.ndarray, min_occ: float = 0.04, max_occ: float = 0.12) -> bool:
     """
     Detects if there is a piece in the cell based on the number of occupied pixels.
+    The occuppancy ratio must be within the specified min and max thresholds to decrease number of false positives.
     """
     _, thresh = cv2.threshold(cell_img, 200, 255, cv2.THRESH_BINARY)
     occupied = cv2.countNonZero(thresh)
     total = cell_img.shape[0] * cell_img.shape[1]
     ratio = occupied / total
-
-    return ratio > occupancy_thresh
+    return min_occ <= ratio <= max_occ
 
 
 def detect_piece_type(cell_img: np.ndarray, min_val: float = 0.835, max_val: float = 1.2) -> str:
@@ -272,6 +275,8 @@ def get_position_from_action(action: str) -> str:
 # =================================
 # Core Board Detection Logic
 # =================================
+
+
 def _create_quad_visualization(
     img_raw: np.ndarray, pts_src: np.ndarray, title: str, debug_display=None
 ) -> np.ndarray:
@@ -371,7 +376,12 @@ def detect_board_contour(img: np.ndarray) -> tuple[np.ndarray, float] | None:
                     selected_area = area_approx  # Store the area
 
     if board_contour is None:
-        print("⚠️ WARNING: No suitable contour found.")
+        global BOARD_CONTOUR_WARNING_COUNTER
+        BOARD_CONTOUR_WARNING_COUNTER += 1
+        if BOARD_CONTOUR_WARNING_COUNTER == 1 or BOARD_CONTOUR_WARNING_COUNTER % 1000 == 0:
+            print("⚠️ WARNING: No suitable contour found.")
+        if BOARD_CONTOUR_WARNING_COUNTER >= 10000:
+            BOARD_CONTOUR_WARNING_COUNTER = 0  # prevent overflow
         return None
 
     # Step 6: Final Extrapolation/Ordering
@@ -387,7 +397,14 @@ def detect_board_contour(img: np.ndarray) -> tuple[np.ndarray, float] | None:
 
     # Step 7: Check Area Confidence
     if selected_area < MIN_BOARD_AREA_THRESHOLD:
-        print(f"⚠️ WARNING: Detected area ({selected_area:.0f}) is too small. Confidence failed.")
+        global SELECTED_AREA_WARNING_COUNTER
+        SELECTED_AREA_WARNING_COUNTER += 1
+        if SELECTED_AREA_WARNING_COUNTER == 1 or SELECTED_AREA_WARNING_COUNTER % 1000 == 0:
+            print(
+                f"⚠️ WARNING: Detected area ({selected_area:.0f}) is too small. Confidence failed."
+            )
+        if SELECTED_AREA_WARNING_COUNTER >= 10000:
+            SELECTED_AREA_WARNING_COUNTER = 0  # prevent overflow
         return None  # Return None to trigger the hard-coded fallback
 
     # Step 8: Return points and area. Visualization happens in prepare_frame_for_vlm

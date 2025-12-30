@@ -6,18 +6,23 @@ from queue import Queue
 
 # Local modules
 from backend_client import (
-    get_player_turn,
     send_reasoning,
     set_judge_status,
-    set_player_turn,
 )
+from board_manager import POSITION_TO_COORDS, BoardManager
 from camera import CameraSystem
 from config import TicTacToeConfig
 from debug_display import DebugDisplay
 from eval_lerobot import Gr00tRobotInferenceClient
 from lerobot.robots import make_robot_from_config  # noqa: F401
 from rtc_controller import RTCMotionController
-from utils import prepare_frame_for_vlm, print_blue, print_green, print_yellow
+from utils import (
+    get_position_from_action,
+    prepare_frame_for_vlm,
+    print_blue,
+    print_green,
+    print_yellow,
+)
 from vlm_client import VLMClient
 
 GAME_RESULT = {
@@ -65,6 +70,9 @@ class TicTacToeBot:
         # Camera subsystem (captures images in sync with robot motion for interface)
         self.camera_system = CameraSystem(self.robot, self.robot_lock, cfg.camera_fps)
 
+        # Board game subsystem (manages turns by detecting piece placement)
+        self.board_manager = BoardManager(self.camera_system.get_latest_obs)
+
         # Shared action queue (used by inference and control loops)
         self.action_queue: Queue[dict[str, float]] = Queue(maxsize=cfg.action_horizon)
 
@@ -72,19 +80,20 @@ class TicTacToeBot:
         self.debug_display = DebugDisplay() if cfg.show_board_images else None
 
     # ------------------ Game State Helpers ------------------
-    def wait_until_player_turn(self, expected: bool) -> None:
-        while get_player_turn() != expected:
-            time.sleep(0.2)
-
-    def handle_pause(self) -> None:
-        print_yellow(" 👨 Player's turn! Make a move, then press SPACE to resume.")
+    def handle_player_turn(self) -> None:
+        print_yellow(" 👨 Player's turn! Make a move.")
+        self.board_manager.state = "human_turn"
         while not self.action_queue.empty():
             self.action_queue.get_nowait()  # clear action queue before robot's next turn
 
-    def handle_resume(self) -> None:
+        # BoardManager will detect the piece placed by the human. Block here until then.
+        while self.board_manager.state != "robot_turn":
+            time.sleep(0.9)
+
+    def handle_robot_turn(self) -> None:
         """Robot's turn: VLM predicts move; then RTC control executes it."""
         print_green(" 🤖 Bot's turn! Thinking...")
-
+        self.board_manager.state = "analyzing"
         # --- STEP 1: PRE-MOVE ANALYSIS ---
         # Retrieve latest camera frame for VLM inference
         obs = self.camera_system.get_latest_obs()
@@ -101,10 +110,16 @@ class TicTacToeBot:
         if state != "ongoing" and action == "N/A":
             return
 
+        # Signal the robot is about to perform an action in a certain box
+        row, col = POSITION_TO_COORDS[get_position_from_action(action)]
+        self.board_manager.next_robot_move = (row, col)
+        self.board_manager.state = "robot_turn"
+
         # Execute move. Perform the action steps using real-time chunking
         self._start_rtc_for_move(action)
 
         # --- STEP 2: POST-MOVE ANALYSIS ---
+        self.board_manager.state = "analyzing"
         set_judge_status(True)
         # Retrieve camera frame after move
         obs_post = self.camera_system.get_latest_obs()
@@ -112,7 +127,7 @@ class TicTacToeBot:
         img_post = prepare_frame_for_vlm(obs_post, self.cfg, self.debug_display)
 
         # Get the game state after the move
-        move_dict_2 = self.vlm_client.get_post_move_state(img_post)  # , self.cfg.reasoning_effort)
+        move_dict_2 = self.vlm_client.get_post_move_state(img_post)
         move_dict_2["visible"] = False
         send_reasoning(move_dict_2)
         print_green(f" 🤖 Bot's post-move analysis (step 2): {json.dumps(move_dict_2, indent=4)}")
@@ -120,11 +135,9 @@ class TicTacToeBot:
         set_judge_status(False)
         # Update the game state and check if game is over
         self.game_state = move_dict_2.get("game_state", "ongoing")
+        self.board_manager.state = "human_turn"
         if self.game_state != "ongoing":
             return
-
-        # End the bot's turn
-        set_player_turn(True)
 
     def _start_rtc_for_move(self, language_instruction: str):
         """
@@ -133,6 +146,7 @@ class TicTacToeBot:
         executes them on the robot (control loop), and updates telemetry until the turn ends.
         """
         rtc = RTCMotionController(
+            board_manager=self.board_manager,
             robot=self.robot,
             client=self.client,
             robot_lock=self.robot_lock,
@@ -162,16 +176,13 @@ class TicTacToeBot:
         """
         self.robot.connect()
         self.camera_system.start()
-
-        set_player_turn(True)
+        self.board_manager.start()
 
         while self.game_state == "ongoing":
-            if get_player_turn():
-                self.handle_pause()
-                self.wait_until_player_turn(False)  # blocks until turn status changes to False
-                time.sleep(0.1)
-            else:
-                self.handle_resume()
+            if self.board_manager.state == "human_turn":
+                self.handle_player_turn()
+            elif self.board_manager.state == "robot_turn":
+                self.handle_robot_turn()
 
         # Cleanup
         self.camera_system.stop()

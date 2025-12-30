@@ -9,7 +9,6 @@ import numpy as np
 
 # Local modules
 from backend_client import (
-    get_player_turn,
     send_telemetry,
 )
 from eval_lerobot import Gr00tRobotInferenceClient
@@ -42,6 +41,7 @@ class RTCMotionController:
 
     def __init__(
         self,
+        board_manager,
         robot: Robot,
         client: Gr00tRobotInferenceClient,
         robot_lock: threading.Lock,
@@ -53,6 +53,9 @@ class RTCMotionController:
         rtc_overlap: int = 4,
         action_queue_threshold: float = 0.5,
     ):
+        # --- Board manager for turn status ---
+        self.board_manager = board_manager
+
         # --- Robot and concurrency ---
         self.robot = robot
         self.client = client
@@ -88,7 +91,7 @@ class RTCMotionController:
         """
         last_action = None
 
-        while not get_player_turn():
+        while self.board_manager.state == "robot_turn":
             try:
                 # Wait for a new action with a short timeout to remain responsive
                 action = self.action_queue.get(timeout=0.05)
@@ -133,7 +136,7 @@ class RTCMotionController:
         Continuously fetches action chunks from the policy server and merges them into the action queue,
         respecting chunk size threshold and temporal alignment.
         """
-        while not get_player_turn():
+        while self.board_manager.state == "robot_turn":
             try:
                 # Only fetch new chunk if remaining fraction of the queue is below threshold
                 qsize = self.action_queue.qsize()

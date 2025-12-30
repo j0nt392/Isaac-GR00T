@@ -97,7 +97,7 @@ class VLMClient:
         - If the game is already over: Set "game_state" to 'win', 'draw', or 'loss' (from X’s perspective) and "action" to "N/A".
         - If the game is ongoing, set "game_state" to 'ongoing' and provide the best "action".
         - Do NOT evaluate any state *after* your move.
-        - Be concise. Output ONLY the JSON.
+        - Be concise. Output ONLY the JSON and adhere to the action and position formats strictly.
         """
 
     def _build_prompt_after_move(self) -> str:
@@ -115,7 +115,7 @@ class VLMClient:
         - Check if the board is now full and X did not win. If so, set "game_state" to 'draw'.
         - Otherwise, set "game_state" to 'ongoing'.
         - Do NOT suggest any action, nor evaluate future moves. Set "action" to "N/A".
-        - Be concise. Output ONLY the JSON.
+        - Be concise. Output ONLY the JSON and adhere to the format strictly.
         """
 
     # --- Client initialization ---
@@ -155,6 +155,7 @@ class VLMClient:
             if key not in move_dict:
                 print_yellow(f" ⚠️ Missing required key '{key}' in VLM response. Using default.")
                 move_dict[key] = DEFAULT_MOVE.get(key, "N/A")
+        move_dict["action"] = move_dict["action"].replace("middle", "center")
         return move_dict
 
     # --- Provider calls and reasoning streaming ---
