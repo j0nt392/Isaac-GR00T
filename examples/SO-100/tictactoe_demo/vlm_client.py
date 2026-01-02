@@ -65,7 +65,6 @@ class VLMClient:
     def __init__(self, model_name: str):
         self.model_name = model_name.lower()
         self.prompt_before_move = self._build_prompt_before_move()
-        self.prompt_after_move = self._build_prompt_after_move()
         self._init_clients()
 
         # Map model names to provider functions
@@ -85,36 +84,37 @@ class VLMClient:
         json_format = json.dumps(EXPECTED_RESPONSE_FORMAT, indent=4)
         return f"""
         You are X in a game of Tic-Tac-Toe. The input image shows the current 3x3 board.
-        Your goal is to choose the strongest move and win.
+        Your goal is to choose the strongest legal move and win.
 
         Your response must be a JSON object using the following format:
         {json_format}
 
         Rules and constraints (Strictly before the move):
-        - The "action" format must be exactly 7 words: "Place the X in the <position> box". 
-          Where <position> can only be: "top-left", "top-center", "top-right", "center-left", "center", "center-right", "bottom-left", "bottom-center", "bottom-right".
-          For example, "Place the X in the center box".
-        - The "action" must be "N/A" if the game is already over (X or O has 3-in-a-row, or board is full).
-        - Double-check that the selected square is not already occupied!
-        - Be concise. Output ONLY the JSON and adhere to the action and position formats strictly.
-        """
 
-    def _build_prompt_after_move(self) -> str:
-        # Step 2: Post-Move State Check
-        json_format = json.dumps(EXPECTED_RESPONSE_FORMAT, indent=4)
-        return f"""
-        Analyze the input image, which shows the board *after* the previous move by X.
-        Your sole task is to determine the final game state.
-        
-        Your response must be a JSON object using the following format:
-        {json_format}
+        - The "action" field MUST be ONE of the following:
+        1) Exactly "N/A"
+        2) A 7-word sentence in the exact format:
+            "Place the X in the <position> box"
 
-        Rules and constraints (Strictly after the move):
-        - Check if X has just won by completing 3-in-a-row. If so, set "game_state" to 'win'.
-        - Check if the board is now full and X did not win. If so, set "game_state" to 'draw'.
-        - Otherwise, set "game_state" to 'ongoing'.
-        - Do NOT suggest any action, nor evaluate future moves. Set "action" to "N/A".
-        - Be concise. Output ONLY the JSON and adhere to the format strictly.
+        - The 7-word rule applies ONLY when placing a move.
+        It does NOT apply to "N/A".
+
+        - When placing a move, <position> MUST be exactly one of:
+        "top-left", "top-center", "top-right",
+        "center-left", "center", "center-right",
+        "bottom-left", "bottom-center", "bottom-right".
+
+        - Example valid actions:
+        - "Place the X in the center box"
+        - "N/A"
+
+        - "N/A" MUST be used ONLY if the game is already over
+        (X or O has three in a row, or the board is full).
+
+        - Never append words to "N/A".
+        - Double-check that the chosen square is not already occupied.
+
+        - Be concise. Output ONLY the JSON. Do not include explanations or extra text.
         """
 
     # --- Client initialization ---
@@ -415,13 +415,8 @@ class VLMClient:
     # --- Public Methods ---
 
     def get_move_decision(self, img: np.ndarray, reasoning_effort: str = "low") -> dict:
-        """Step 1: Get the strategic decision (action and pre-move state)."""
-        print_yellow(" ➡️ Calling VLM: Step 1 (Move Decision)")
+        """Gets the strategic decision (action and pre-move state)."""
+        print_yellow(" ➡️ Calling VLM: (Move Decision)")
         return self._call_vlm(
             img, self.prompt_before_move, stream_reasoning=True, reasoning_effort=reasoning_effort
         )
-
-    def get_post_move_state(self, img: np.ndarray) -> dict:
-        """Step 2: Get the post-move game state (win/draw/ongoing)."""
-        print_yellow(" ➡️ Calling VLM: Step 2 (Post-Move State Check)")
-        return self._call_vlm(img, self.prompt_after_move, stream_reasoning=False)

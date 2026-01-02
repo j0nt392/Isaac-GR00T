@@ -2,6 +2,7 @@ import threading
 import time
 from collections.abc import Callable
 
+from backend_client import set_board_state
 from utils import detect_piece_type, extract_cell_image, is_piece_in_cell
 
 POSITION_TO_COORDS = {
@@ -74,6 +75,7 @@ class BoardManager:
                         print(f"👨 Human placed piece {value} at:", (row, col))
                         self.state = "analyzing"  # prepare to evaluate board, then robot's turn
                         self.update_board(row, col, value)
+                        set_board_state(self.logical_board)
                         return
 
     def _check_robot_move(self, row: int, col: int):
@@ -103,6 +105,7 @@ class BoardManager:
         print(f"🤖 Robot placed piece {value} at:", (row, col))
         self.state = "analyzing"  # stop checking, VLM will analyze next
         self.update_board(row, col, value)
+        set_board_state(self.logical_board)
 
     # ---------------- Utility Methods ----------------
     def _detect_piece_in_cell(self, row: int, col: int, piece_type: str) -> bool:

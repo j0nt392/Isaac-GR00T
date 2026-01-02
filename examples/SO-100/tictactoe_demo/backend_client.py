@@ -84,6 +84,21 @@ def set_player_turn(val: bool) -> None:
         pass
 
 
+def set_board_state(state: list) -> None:
+    try:
+        requests.post(f"{BACKEND_URL}/board_state", json={"board_state": state}, timeout=0.2)
+    except Exception:
+        pass
+
+
+def get_board_state() -> dict:
+    try:
+        r = requests.get(f"{BACKEND_URL}/board_state", timeout=0.2)
+        return r.json().get("board_state", {})
+    except Exception:
+        return {}
+
+
 def set_judge_status(val: bool) -> None:
     try:
         requests.post(f"{BACKEND_URL}/judge_status", json={"is_judging": val}, timeout=0.2)
