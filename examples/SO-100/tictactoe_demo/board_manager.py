@@ -72,7 +72,7 @@ class BoardManager:
                 if self.logical_board[row][col] is None:
                     if self._detect_piece_in_cell(row, col, value):
                         print(f"👨 Human placed piece {value} at:", (row, col))
-                        self.state = "robot_turn"  # switch turn
+                        self.state = "analyzing"  # prepare to evaluate board, then robot's turn
                         self.update_board(row, col, value)
                         return
 

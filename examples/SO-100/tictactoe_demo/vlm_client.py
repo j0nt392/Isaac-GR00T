@@ -91,12 +91,11 @@ class VLMClient:
         {json_format}
 
         Rules and constraints (Strictly before the move):
-        - The "action" format must be: "Place the X in the <position> box". Where <position> can only be: "top-left", "top-center", "top-right", "center-left", "center", "center-right", "bottom-left", "bottom-center", "bottom-right".
-        - The "action" must be "N/A" only if the game is already over (X or O has 3-in-a-row, or board is full).
+        - The "action" format must be exactly 7 words: "Place the X in the <position> box". 
+          Where <position> can only be: "top-left", "top-center", "top-right", "center-left", "center", "center-right", "bottom-left", "bottom-center", "bottom-right".
+          For example, "Place the X in the center box".
+        - The "action" must be "N/A" if the game is already over (X or O has 3-in-a-row, or board is full).
         - Double-check that the selected square is not already occupied!
-        - If the game is already over: Set "game_state" to 'win', 'draw', or 'loss' (from X’s perspective) and "action" to "N/A".
-        - If the game is ongoing, set "game_state" to 'ongoing' and provide the best "action".
-        - Do NOT evaluate any state *after* your move.
         - Be concise. Output ONLY the JSON and adhere to the action and position formats strictly.
         """
 
@@ -155,7 +154,10 @@ class VLMClient:
             if key not in move_dict:
                 print_yellow(f" ⚠️ Missing required key '{key}' in VLM response. Using default.")
                 move_dict[key] = DEFAULT_MOVE.get(key, "N/A")
-        move_dict["action"] = move_dict["action"].replace("middle", "center")
+        action = move_dict["action"]
+        move_dict["action"] = action.replace("middle", "center")
+        if not action.endswith("box"):
+            move_dict["action"] += " box"
         return move_dict
 
     # --- Provider calls and reasoning streaming ---

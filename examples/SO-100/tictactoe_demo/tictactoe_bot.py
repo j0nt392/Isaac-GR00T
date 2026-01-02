@@ -7,7 +7,6 @@ from queue import Queue
 # Local modules
 from backend_client import (
     send_reasoning,
-    set_judge_status,
 )
 from board_manager import POSITION_TO_COORDS, BoardManager
 from camera import CameraSystem
@@ -17,6 +16,7 @@ from eval_lerobot import Gr00tRobotInferenceClient
 from lerobot.robots import make_robot_from_config  # noqa: F401
 from rtc_controller import RTCMotionController
 from utils import (
+    analyze_board_status,
     get_position_from_action,
     prepare_frame_for_vlm,
     print_blue,
@@ -82,62 +82,35 @@ class TicTacToeBot:
     # ------------------ Game State Helpers ------------------
     def handle_player_turn(self) -> None:
         print_yellow(" 👨 Player's turn! Make a move.")
-        self.board_manager.state = "human_turn"
         while not self.action_queue.empty():
             self.action_queue.get_nowait()  # clear action queue before robot's next turn
 
-        # BoardManager will detect the piece placed by the human. Block here until then.
-        while self.board_manager.state != "robot_turn":
+        # BoardManager will detect the piece placed by the human and change state to "analyzing". Block here until then.
+        while self.board_manager.state == "human_turn":
             time.sleep(0.9)
 
     def handle_robot_turn(self) -> None:
         """Robot's turn: VLM predicts move; then RTC control executes it."""
         print_green(" 🤖 Bot's turn! Thinking...")
-        self.board_manager.state = "analyzing"
-        # --- STEP 1: PRE-MOVE ANALYSIS ---
+        self.board_manager.state = "analyzing"  # pause  BoardManage until VLM decision is made
+
         # Retrieve latest camera frame for VLM inference
         obs = self.camera_system.get_latest_obs()
         img = prepare_frame_for_vlm(obs, self.cfg, self.debug_display)
 
-        # VLM decision (move or game over)
-        move_dict_1 = self.vlm_client.get_move_decision(img, self.cfg.reasoning_effort)
-        send_reasoning(move_dict_1)
-        print_green(f" 🤖 Bot's decision (step 1): {json.dumps(move_dict_1, indent=4)}")
+        # VLM decision (move or N/A if game over)
+        move_dict = self.vlm_client.get_move_decision(img, self.cfg.reasoning_effort)
+        send_reasoning(move_dict)
+        print_green(f" 🤖 Bot's decision: {json.dumps(move_dict, indent=4)}")
 
-        state, action = move_dict_1["game_state"], move_dict_1["action"]
-        self.game_state = state
-        # Check if game is already over (win, loss, or draw)
-        if state != "ongoing" and action == "N/A":
-            return
-
-        # Signal the robot is about to perform an action in a certain box
-        row, col = POSITION_TO_COORDS[get_position_from_action(action)]
-        self.board_manager.next_robot_move = (row, col)
+        action = move_dict["action"]
         self.board_manager.state = "robot_turn"
-
-        # Execute move. Perform the action steps using real-time chunking
-        self._start_rtc_for_move(action)
-
-        # --- STEP 2: POST-MOVE ANALYSIS ---
-        self.board_manager.state = "analyzing"
-        set_judge_status(True)
-        # Retrieve camera frame after move
-        obs_post = self.camera_system.get_latest_obs()
-        print_green("Sending second frame to vlm")
-        img_post = prepare_frame_for_vlm(obs_post, self.cfg, self.debug_display)
-
-        # Get the game state after the move
-        move_dict_2 = self.vlm_client.get_post_move_state(img_post)
-        move_dict_2["visible"] = False
-        send_reasoning(move_dict_2)
-        print_green(f" 🤖 Bot's post-move analysis (step 2): {json.dumps(move_dict_2, indent=4)}")
-
-        set_judge_status(False)
-        # Update the game state and check if game is over
-        self.game_state = move_dict_2.get("game_state", "ongoing")
-        self.board_manager.state = "human_turn"
-        if self.game_state != "ongoing":
-            return
+        # Signal the robot is about to perform an action in a certain box
+        if action != "N/A":
+            row, col = POSITION_TO_COORDS[get_position_from_action(action)]
+            self.board_manager.next_robot_move = (row, col)
+            # Execute move using real-time chunking. When piece is detected by BoardManager, state will be "analyzing" and move ends.
+            self._start_rtc_for_move(action)
 
     def _start_rtc_for_move(self, language_instruction: str):
         """
@@ -166,11 +139,11 @@ class TicTacToeBot:
         """
         Main loop of the TicTacToeBot.
 
-        - Starts the robot and camera system.
+        - Starts the robot, camera system and board manager.
         - Alternates turns between the human player and the robot.
-        - On the player's turn: waits for input, clears action queue.
+        - On the player's turn: clears action queue and waits for BoardManager to detect move.
         - On the robot's turn: retrieves latest camera observation, uses VLM to predict move,
-        and executes the move using RTCMotionController.
+        and executes the move using RTCMotionController. Waits for piece detection, then analyzes board state again.
         - Continues until the game reaches a terminal state (win, loss, or draw).
         - Cleans up threads and disconnects the robot on completion.
         """
@@ -181,11 +154,19 @@ class TicTacToeBot:
         while self.game_state == "ongoing":
             if self.board_manager.state == "human_turn":
                 self.handle_player_turn()
+                self.game_state = analyze_board_status(self.board_manager.logical_board)
+                print_blue(f" 🔍 Current game state: {self.game_state}")
+                self.board_manager.state = "robot_turn"
             elif self.board_manager.state == "robot_turn":
                 self.handle_robot_turn()
+                self.game_state = analyze_board_status(self.board_manager.logical_board)
+                print_blue(f" 🔍 Current game state: {self.game_state}")
+                self.board_manager.state = "human_turn"
 
+        send_reasoning({"game_over": True, "game_state": self.game_state, "visible": False})
         # Cleanup
         self.camera_system.stop()
+        self.board_manager.stop()
         self.robot.disconnect()
         print_blue(GAME_RESULT[self.game_state])
         print_blue(" 🏆 Game over! Thanks for playing.")

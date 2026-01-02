@@ -19,13 +19,11 @@ EXPECTED_RESPONSE_FORMAT = {
     "observation": "<short text describing your observation of the board state in words (no ASCII art or such, just semantically), maximum 15 words>",
     "reasoning": "<short text describing your reasoning for the next move, maximum 15 words>",
     "action": "<your next move in the format described below, or 'N/A' if no moves remain>",
-    "game_state": "<one of ['win', 'draw', 'loss', 'ongoing'] representing the state of the game from X’s perspective>",
 }
 DEFAULT_MOVE = {
     "observation": "Could not parse board",
     "reasoning": "Error in GPT response",
     "action": "N/A",
-    "game_state": "Unknown",
 }
 
 

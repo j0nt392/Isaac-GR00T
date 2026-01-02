@@ -477,3 +477,37 @@ def prepare_frame_for_vlm(obs: dict, cfg, debug_display=None):
         )
 
     return img_final
+
+
+# =================================
+# Board Analysis Utilities
+# =================================
+
+
+def analyze_board_status(board: list[list[str | None]]) -> str:
+    """
+    Evaluates the board from X's perspective.
+    Returns: 'ongoing' 'win', 'loss', or 'draw'.
+    """
+    print("Analyzing board state...")
+    all_lines = []
+    # Add rows
+    all_lines.extend(board)
+    # Add colums
+    all_lines.extend([[board[r][c] for r in range(3)] for c in range(3)])
+    # Add diagonals
+    all_lines.append([board[i][i] for i in range(3)])
+    all_lines.append([board[i][2 - i] for i in range(3)])
+
+    # Check for win/loss
+    for line in all_lines:
+        if all(cell == "X" for cell in line):
+            return "win"
+        if all(cell == "O" for cell in line):
+            return "loss"
+
+    # Check for draw
+    if all(cell is not None for row in board for cell in row):
+        return "draw"
+
+    return "ongoing"
