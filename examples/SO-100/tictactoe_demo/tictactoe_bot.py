@@ -5,9 +5,6 @@ import time
 from queue import Queue
 
 # Local modules
-from backend_client import (
-    send_reasoning,
-)
 from board_manager import POSITION_TO_COORDS, BoardManager
 from camera import CameraSystem
 from config import TicTacToeConfig
@@ -150,6 +147,9 @@ class TicTacToeBot:
         self.robot.connect()
         self.camera_system.start()
         self.board_manager.start()
+        self.game_state = analyze_board_status(
+            self.board_manager.logical_board
+        )  # perform initial analysis (board could be non-empty)
 
         while self.game_state == "ongoing":
             if self.board_manager.state == "human_turn":

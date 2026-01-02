@@ -16,8 +16,8 @@ import matplotlib.pyplot as plt
 # Local modules
 from backend_client import (
     get_player_turn,
+    send_decisions,
     send_frame,
-    send_reasoning,
     send_telemetry,
     set_player_turn,
 )
@@ -100,7 +100,7 @@ class TicTacToeBot:
 
         # Predict next move
         move_dict = self.vlm_client.generate_vla_prompt(img, self.cfg.reasoning_effort)
-        send_reasoning(move_dict)  # Send reasoning to fastapi backend
+        send_decisions(move_dict)  # Send reasoning to fastapi backend
         print_green(f" 🤖 Bot's decision: {move_dict['action']}")
 
         # Proceed or stop based on game state. Game can end before or after making a move
