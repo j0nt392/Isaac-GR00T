@@ -32,7 +32,7 @@ pip-wheel-metadata/
 
 
 # dev tools
-
+.env
 .envrc
 .python-version
 .idea
@@ -53,7 +53,8 @@ pyrightconfig.json
 doc/_build/
 *.swp
 .DS_Store
-
+outputs/
+demo_data/
 
 # python
 
@@ -100,6 +101,7 @@ dist
 # Log
 *.log
 *.log.*
+**/logs/**.txt
 
 # Data
 !**/alpaca-data-conversation.json
@@ -122,3 +124,4 @@ playground/
 demo_data/gr00t-gr1-apple-to-shelf/
 tmp/
 output/
+board_images/

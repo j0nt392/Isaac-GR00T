@@ -44,21 +44,16 @@ python -m lerobot.replay \
 
 import logging
 import os
-
-# NOTE:
-# Sometimes we would like to abstract different env, or run this on a separate machine
-# User can just move this single python class method gr00t/eval/service.py
-# to their code or do the following line below
 import sys
+import threading
 import time
 from dataclasses import asdict, dataclass
 from pprint import pformat
+from queue import Empty, Queue
 
-import cv2
 import draccus
 import matplotlib.pyplot as plt
 import numpy as np
-import requests
 from lerobot.cameras.opencv.configuration_opencv import (  # noqa: F401
     OpenCVCameraConfig,
 )
@@ -75,6 +70,7 @@ from lerobot.utils.utils import (
     log_say,
 )
 
+# NOTE:
 sys.path.append(os.path.expanduser("~/home/wsi-robotics/forks/Isaac-GR00T/gr00t/eval/"))
 # from service import ExternalRobotInferenceClient
 
@@ -169,6 +165,47 @@ class Gr00tRobotInferenceClient:
 #################################################################################
 
 
+######################### RTC Merge Function ####################################
+def merge_with_queue(action_queue: Queue, new_chunk: list[dict[str, float]], overlap: int = 4):
+    """
+    Thread-safe merge of new actions into the existing queue with exponential RTC blending.
+    Rebuilds the queue safely to prevent abrupt jumps caused by concurrent access.
+    """
+
+    # 1. Extract all queued actions (safe, drains queue)
+    existing = []
+    while not action_queue.empty():
+        try:
+            existing.append(action_queue.get_nowait())
+        except Empty:
+            break
+
+    remaining = len(existing)
+    actual_overlap = min(overlap, remaining, len(new_chunk))
+
+    # 2. Blend overlap region
+    if actual_overlap > 0:
+        for i in range(actual_overlap):
+            # exponential decay, smooth as butter
+            alpha = np.exp(-i / actual_overlap)
+
+            old_act = existing[remaining - actual_overlap + i]
+            new_act = new_chunk[i]
+
+            blended = {k: alpha * old_act[k] + (1 - alpha) * new_act[k] for k in old_act}
+            existing[remaining - actual_overlap + i] = blended
+
+    # 3. Append remaining new actions
+    merged = existing + new_chunk[actual_overlap:]
+
+    # 4. Requeue everything safely
+    for action in merged:
+        if action_queue.full():
+            break
+        action_queue.put_nowait(action)
+
+
+#################################################################################
 def view_img(img, overlay_img=None):
     """
     This is a matplotlib viewer since cv2.imshow can be flaky in lerobot env
@@ -194,38 +231,15 @@ class EvalConfig:
     policy_host: str = "localhost"  # host of the gr00t server
     policy_port: int = 5555  # port of the gr00t server
     action_horizon: int = 8  # number of actions to execute from the action chunk
+    actions_per_chunk: int = 16  # how many actions to enqueue per policy query (server max ~16)
+    chunk_size_threshold: float = 0.5  # send new obs when qsize/chunk_size <= threshold
     lang_instruction: str = "Grab pens and place into pen holder."
     play_sounds: bool = False  # whether to play sounds
     timeout: int = 60  # timeout in seconds
     show_images: bool = False  # whether to show images
-
-
-BACKEND = "http://localhost:8000"
-
-
-def send_telemetry(observation_dict, robot_state_keys):
-    motors = [float(observation_dict[k]) for k in robot_state_keys]
-    payload = {"t": time.time(), "motors": motors}
-    try:
-        requests.post(f"{BACKEND}/ingest", json=payload, timeout=0.2)
-    except Exception as e:
-        logging.error(f"Failed to send telemetry: {e}")
-
-
-def send_frame(camera_key: str, frame_rgb):
-    frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
-    ok, buf = cv2.imencode(".jpg", frame_bgr)
-    if not ok:
-        return
-    try:
-        requests.post(
-            f"{BACKEND}/ingest_frame/{camera_key}",
-            data=buf.tobytes(),
-            headers={"content-type": "image/jpeg"},
-            timeout=0.1,
-        )
-    except Exception:
-        pass
+    control_hz: float = 30.0
+    min_queue_size: int = 16
+    max_queue_size: int = 16
 
 
 @draccus.wrap()
@@ -248,7 +262,7 @@ def eval(cfg: EvalConfig):
     # NOTE: for so100/so101, this should be:
     # ['shoulder_pan.pos', 'shoulder_lift.pos', 'elbow_flex.pos', 'wrist_flex.pos', 'wrist_roll.pos', 'gripper.pos']
     robot_state_keys = list(robot._motors_ft.keys())
-    # print("robot_state_keys: ", robot_state_keys)
+    print("robot_state_keys: ", robot_state_keys)
 
     # Step 2: Initialize the policy
     policy = Gr00tRobotInferenceClient(
@@ -263,23 +277,106 @@ def eval(cfg: EvalConfig):
         blocking=True,
     )
 
-    # Step 3: Run the Eval Loop
-    while True:
-        # get the realtime image
-        observation_dict = robot.get_observation()
-        # send_telemetry(observation_dict, robot_state_keys)
-        # if "front" in observation_dict:
-        #     send_frame("front", observation_dict["front"])
-        # if "wrist" in observation_dict:
-        #     send_frame("wrist", observation_dict["wrist"])
-        # print("observation_dict", observation_dict.keys())
-        action_chunk = policy.get_action(observation_dict, language_instruction)
+    # Runtime clamps to keep queue/chunk sizes stable and avoid jerkiness
+    max_queue_size = min(int(cfg.max_queue_size), 16)
+    actions_per_chunk = max(1, min(int(cfg.actions_per_chunk), 16))
 
-        for i in range(cfg.action_horizon):
-            action_dict = action_chunk[i]
-            # print("action_dict", action_dict.keys())
-            robot.send_action(action_dict)
-            time.sleep(0.02)  # Implicitly wait for the action to be executed
+    action_queue: Queue[dict[str, float]] = Queue(maxsize=max_queue_size)
+    stop_event = threading.Event()
+    last_action: dict[str, float] | None = None
+    control_dt = 1.0 / max(1.0, float(cfg.control_hz))
+    # Track the typical chunk size returned by the policy (initialize from config)
+    action_chunk_size = actions_per_chunk
+
+    # ---------- BACKGROUND INFERENCE LOOP ----------
+    def inference_loop():
+        nonlocal last_action
+        nonlocal action_chunk_size
+        while not stop_event.is_set():
+            try:
+                # Only send a fresh observation when queue fullness is below threshold
+                # i.e. qsize / action_chunk_size <= chunk_size_threshold
+                qsize = action_queue.qsize()
+                if (qsize / float(action_chunk_size)) > cfg.chunk_size_threshold:
+                    time.sleep(0.002)
+                    continue
+
+                # get fresh observation from robot
+                obs = robot.get_observation()
+
+                # blocking call to remote GR00T server (ZMQ / HTTP)
+                action_chunk = policy.get_action(obs, cfg.lang_instruction)
+                # action_chunk: List[dict[str, float]] (desired length ~= actions_per_chunk depending on server)
+
+                # Update our notion of chunk size based on what we received
+                received_len = len(action_chunk)
+                if received_len > 0:
+                    action_chunk_size = max(action_chunk_size, received_len)
+
+                # enqueue actions, respecting max_queue_size
+                # for idx, action_dict in enumerate(action_chunk):
+                #     if idx >= actions_per_chunk:
+                #         break
+                #     if stop_event.is_set():
+                #         break
+                #     if action_queue.full():
+                #         break
+                #     action_queue.put(action_dict)
+                merge_with_queue(action_queue, action_chunk, overlap=cfg.actions_per_chunk // 2)
+
+            except Exception as e:
+                logging.error(f"[inference_loop] Error: {e}")
+                time.sleep(0.05)
+
+    # ---------- CONTROL LOOP (MAIN THREAD) ----------
+
+    def control_loop():
+        nonlocal last_action
+        smoothing_factor = 0.8  # 80% previous action, 20% new action (tune as needed)
+
+        while not stop_event.is_set():
+            t0 = time.time()
+            try:
+                # Get a fresh action if available
+                action = action_queue.get_nowait()
+            except Empty:
+                # No new action: hold previous
+                if last_action is None:
+                    time.sleep(0.002)
+                    continue
+                action = last_action
+
+            # Apply low-pass filter for smoothness (always, if last_action exists)
+            if last_action is not None:
+                action = {
+                    k: smoothing_factor * last_action[k] + (1 - smoothing_factor) * action[k]
+                    for k in action
+                }
+
+            # Send filtered action
+            try:
+                robot.send_action(action)
+            except Exception as e:
+                logging.error(f"[control_loop] Error sending action: {e}")
+
+            last_action = action  # Update for next iteration
+
+            elapsed = time.time() - t0
+            time.sleep(max(0.0, control_dt - elapsed))
+
+    # 4) Run it
+    inference_thread = threading.Thread(target=inference_loop, daemon=True)
+    inference_thread.start()
+
+    try:
+        control_loop()  # run in main thread
+    except KeyboardInterrupt:
+        logging.info("KeyboardInterrupt: stopping...")
+    finally:
+        stop_event.set()
+        inference_thread.join(timeout=1.0)
+        robot.disconnect()
+        logging.info("Robot disconnected, eval finished.")
 
 
 if __name__ == "__main__":
