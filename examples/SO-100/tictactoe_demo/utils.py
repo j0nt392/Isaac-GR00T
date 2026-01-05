@@ -237,7 +237,7 @@ def is_piece_in_cell(cell_img: np.ndarray, min_occ: float = 0.04, max_occ: float
     return min_occ <= ratio <= max_occ
 
 
-def detect_piece_type(cell_img: np.ndarray, min_val: float = 0.835, max_val: float = 1.2) -> str:
+def detect_piece_type(cell_img: np.ndarray, min_val: float = 0.4, max_val: float = 1.2) -> str:
     """
     Determines whether the piece is 'X or 'O' based on the amount of circularity.
     """
@@ -249,6 +249,7 @@ def detect_piece_type(cell_img: np.ndarray, min_val: float = 0.835, max_val: flo
     contours_dilated, _ = cv2.findContours(
         thresh_dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
     )
+
     # Check for O (circle)
     for cnt in contours_dilated:
         area = cv2.contourArea(cnt)

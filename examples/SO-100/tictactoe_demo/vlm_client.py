@@ -71,6 +71,7 @@ class VLMClient:
         self.provider_map = {
             "gemini-2.5-flash": self._call_gemini,
             "gemini-2.5-pro": self._call_gemini,
+            "gemini-3-flash-preview": self._call_gemini,
             "grok-4": self._call_grok,
             "grok-4-fast-non-reasoning": self._call_grok,
             "gpt-5-nano": self._call_openai,

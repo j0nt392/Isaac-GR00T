@@ -1,6 +1,8 @@
 import threading
 import time
+from collections import defaultdict
 from collections.abc import Callable
+from datetime import timedelta
 
 from backend_client import set_board_state
 from utils import detect_piece_type, extract_cell_image, is_piece_in_cell
@@ -44,6 +46,7 @@ class BoardManager:
     # ---------------- Thread Management ----------------
     def start(self):
         self.running = True
+        self._perform_initial_scan()
         threading.Thread(target=self._monitor_loop, daemon=True).start()
 
     def stop(self):
@@ -65,6 +68,38 @@ class BoardManager:
                 time.sleep(0.5)
 
     # ---------------- Move Detection ----------------
+    def _perform_initial_scan(self):
+        """Scans the board to initialize logical state."""
+        time.sleep(3.0)  # allow system to stabilize
+        print("🔍 Performing initial board scan...")
+        n_scans = 70
+        counts = defaultdict(lambda: defaultdict(int))
+        start_time = time.time()
+        for _ in range(n_scans):  # multiple passes for reliability
+            for row in range(3):
+                for col in range(3):
+                    # print(f"Scanning cell ({row}, {col})...")
+                    if self._detect_piece_in_cell(row, col, "O"):
+                        value = "O"
+                    elif self._detect_piece_in_cell(row, col, "X"):
+                        value = "X"
+                    else:
+                        value = "empty"
+                    counts[(row, col)][value] += 1
+
+        # Classify each cell based on majority vote
+        for row in range(3):
+            for col in range(3):
+                piece_type = max(counts[(row, col)], key=counts[(row, col)].get)
+                self.update_board(
+                    row, col, None if piece_type == "empty" else piece_type, print_update=False
+                )
+        end_time = time.time()
+        scan_time = end_time - start_time
+        print(f"⏱️ Initial scan took {timedelta(seconds=scan_time)}.")
+        print("✅ Initial board scan complete.")
+        self.print_board()
+
     def _check_human_move(self):
         """Detects a new piece placed by the human on empty cells."""
         value = "O"
@@ -75,7 +110,6 @@ class BoardManager:
                         print(f"👨 Human placed piece {value} at:", (row, col))
                         self.state = "analyzing"  # prepare to evaluate board, then robot's turn
                         self.update_board(row, col, value)
-                        set_board_state(self.logical_board)
                         return
 
     def _check_robot_move(self, row: int, col: int):
@@ -105,7 +139,6 @@ class BoardManager:
         print(f"🤖 Robot placed piece {value} at:", (row, col))
         self.state = "analyzing"  # stop checking, VLM will analyze next
         self.update_board(row, col, value)
-        set_board_state(self.logical_board)
 
     # ---------------- Utility Methods ----------------
     def _detect_piece_in_cell(self, row: int, col: int, piece_type: str) -> bool:
@@ -119,11 +152,13 @@ class BoardManager:
             and detect_piece_type(img_cell) == piece_type
         )
 
-    def update_board(self, row: int, col: int, value: str):
+    def update_board(self, row: int, col: int, value: str, print_update: bool = True) -> None:
         """Thread-safe update of logical board and switch turn."""
         with self.lock:
             self.logical_board[row][col] = value
-            self.print_board()
+            if print_update:
+                self.print_board()
+            set_board_state(self.logical_board)
 
     def get_state(self) -> str:
         """Thread-safe getter for current state. Returns 'human_turn', 'robot_turn', or 'analyzing'."""

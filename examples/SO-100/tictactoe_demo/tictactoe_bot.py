@@ -4,6 +4,8 @@ import threading
 import time
 from queue import Queue
 
+from backend_client import send_decisions
+
 # Local modules
 from board_manager import POSITION_TO_COORDS, BoardManager
 from camera import CameraSystem
@@ -97,7 +99,7 @@ class TicTacToeBot:
 
         # VLM decision (move or N/A if game over)
         move_dict = self.vlm_client.get_move_decision(img, self.cfg.reasoning_effort)
-        send_reasoning(move_dict)
+        send_decisions(move_dict)
         print_green(f" 🤖 Bot's decision: {json.dumps(move_dict, indent=4)}")
 
         action = move_dict["action"]
@@ -163,7 +165,7 @@ class TicTacToeBot:
                 print_blue(f" 🔍 Current game state: {self.game_state}")
                 self.board_manager.state = "human_turn"
 
-        send_reasoning({"game_over": True, "game_state": self.game_state, "visible": False})
+        send_decisions({"game_over": True, "game_state": self.game_state, "visible": False})
         # Cleanup
         self.camera_system.stop()
         self.board_manager.stop()
