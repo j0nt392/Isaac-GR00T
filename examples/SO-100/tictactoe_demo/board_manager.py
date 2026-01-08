@@ -69,7 +69,7 @@ class BoardManager:
 
     # ---------------- Move Detection ----------------
     def _perform_initial_scan(self):
-        """Scans the board to initialize logical state."""
+        """Scans the board to initialize logical state and decide whose turn it is."""
         time.sleep(3.0)  # allow system to stabilize
         print("🔍 Performing initial board scan...")
         n_scans = 70
@@ -98,6 +98,15 @@ class BoardManager:
         scan_time = end_time - start_time
         print(f"⏱️ Initial scan took {timedelta(seconds=scan_time)}.")
         print("✅ Initial board scan complete.")
+
+        # Decide whose turn it is
+        num_X = sum(cell == "X" for row in self.logical_board for cell in row)
+        num_O = sum(cell == "O" for row in self.logical_board for cell in row)
+        if num_X >= num_O:
+            print("➡️ Game must start with player's turn 👨.")  # human turn by default
+        else:
+            self.state = "robot_turn"
+            print("➡️ Game must start with robot's turn 🤖.")
         self.print_board()
 
     def _check_human_move(self):
